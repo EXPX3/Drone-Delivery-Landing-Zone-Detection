@@ -1,0 +1,38 @@
+ros__parameters:
+  pcd_file_path: "/home/airsim_user/Landing-Assist-Module-LAM/test.pcd"
+  visualize: true #visualization for individual function
+  final_visualize: true #visualizing final result
+  final_result_visualization: "both" # can choose both ,inlier_cloud,outlier_cloud to visualize
+  voxel_size: 0.95 #0.25
+  voxel_downsample_pointcloud: true
+
+
+  # Define the pipeline of processing steps.
+  pipeline:
+    - step: "SOR"
+      enabled: true
+      parameters:
+        nb_neighbors: 20
+        std_ratio: 2.0
+        visualization: "both"
+    - step: "SphericalNeighbourhood"
+      enabled: true
+      parameters:
+        radius: 6.1 #1.1
+        angleThreshold: 10.0 #15.0
+        k: 15 #150
+        landingZoneNumber: 50
+        maxAttempts: 100000 #100
+        visualization: "both"
+        visualization_textSize: 0.8 #0.08
+    - step: "HazarMetrices"
+      enabled: true
+      parameters:
+        hazard: "ALL"  #ALL for calculing whole hazard metrices, 
+                       #DATA_CONFIDENCE ,only caluculates data confidence individually
+                     
+
+ 
+    
+     
+       
