@@ -1,32 +1,42 @@
 # Drone-Delivery-Landing-Zone-Detection
-Algorithms and benchmarking strategies.
 
-Implemented algorithms to date and included in the Monte-carlo based benchmarking strategy. 
+**Algorithms and Benchmarking Strategies**
 
-1. Traditional rule based mathematical models with preset heuristic rules: 
-    1.1 Region_Growing_Segmentation
-    1.2 seq_overlap
-    1.3 kdtree_InflatingCircles
-    1.4 sequentialApproachKdtree
-    1.5 sequentialApproach
+---
+
+## Overview
+
+Implemented algorithms to date and included in the Monte-carlo based benchmarking strategy.
+
+### Algorithms Implemented
+
+1. **Traditional Rule-Based Mathematical Models with Preset Heuristic Rules**:
+    - Region_Growing_Segmentation
+    - seq_overlap
+    - kdtree_InflatingCircles
+    - sequentialApproachKdtree
+    - sequentialApproach
+
+---
+
+## Visualizations
+
+| Algorithm                     | Visualization                              |
+|-------------------------------|--------------------------------------------|
+| **Region_Growing_Segmentation** | ![Region_Growing_Segmentation](media/regiongrowingseg.drawio.png) |
+| **seq_overlap**               | ![seq_overlap](media/seq_throry_imple_resul.drawio.png)          |
+| **kdtree_InflatingCircles**   | ![kdtree_InflatingCircles](media/inflating_circleskdtree.drawio.png) |
+
+> **Note**: For detailed explanation of implementation with flow charts and pseudo code, refer to the paper published here (published by end of Aug 2025).
 
 
-![Region_Growing_Segmentation](media/regiongrowingseg.drawio.png)
+synthetic point clouds generated:
+![synthetic_pointcloud](media/synthetic_pointcloud.drawio.png)
+---
 
-![seq_overlap](media/seq_throry_imple_resul.drawio.png)
+## Configuration
 
-![kdtree_InflatingCircles](media/inflating_circleskdtree.drawio.png)
-
-Note: For detailed explaination of implementation with flow charts and pseudo code refere to the paper published here (published by end of aug 2025).
-
-
-
-We use .yaml file to configure algorithm selection and their parameters.
-You will find the self explainatory file at below path,
-/lib/config/monte_carlo_benchmarking_config.yaml
-
-To test functionality of individual algorithm on own .pcd file and vizualize its output use algo_testing_own_pcd_config.yaml
+We use a `.yaml` file to configure algorithm selection and their parameters. You will find the self-explanatory file at the following path: Drone-Delivery-Landing-Zone-Detection/lib/config/monte_carlo_benchmarking_config.yaml
 
 
-Steps to run the repo - montecarlo based benchmarking:
-- Code related to montecarlo based benchmarking yet to be updated  
+NOTE: More details will be added soon.
