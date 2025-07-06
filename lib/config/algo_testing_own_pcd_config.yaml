@@ -1,0 +1,52 @@
+
+enable_visualization: true
+#enable_visualization: false
+terrain_size: 20.0 # side of a square in meters using which a square shaped terrain of area terrain_size*terrain_size is generated
+
+#-----------------------------------------------------------------------------------------------------------------------------
+# NOTE: Do not edit this section unless you know what you are doing.
+num_simulations: 1  # Reduced for testing; increase to 100 for full runs
+use_pcd_file: true  # Set to true to load pointcloud .pcd from pcd_file_path, false to generate synthetic point cloud
+#-----------------------------------------------------------------------------------------------------------------------------
+
+# Point cloud source selection - NOTE: add your own .pcd file path. 
+pcd_file_path: "/path/to/your.pcd"
+
+# hazardmetrics thresholds
+min_radius_threshold: 2.5
+max_slope_threshold: 25 # in degrees
+min_point_density_threshold: 30.0 # points/m²
+max_relief_threshold: 2.0
+max_roughness_threshold: 0.1
+
+#lzd common parameters if at all used by any
+max_landingZones: 10
+max_Attempts: 10000
+
+# Algorithms configuration
+# NOTE: comment out the algorithms you do not want to run.
+algorithms:
+  - name: Region_Growing_Segmentation
+    curvature_threshold: 0.05
+    min_cluster_size: 50
+    alpha: 0.1
+    cluster_tolerance: 0.25
+  - name: seq_overlap
+    cell_size: 1.0
+    alpha: 0.1
+    cluster_tolerance: 1.0
+  - name: kdtree_InflatingCircles
+    k: 30
+    radiusIncrement: 0.1
+  - name: sequentialApproachKdtree
+    cell_size: 1
+    alpha: 0.1
+    cluster_tolerance: 1.0
+  - name: sequentialApproach
+    cell_size: 1
+    alpha: 0.1
+    cluster_tolerance: 1.0
+  # - name: dummy
+  #   cell_size: dummy
+  #   alpha: dummy
+  #   cluster_tolerance: dummy
