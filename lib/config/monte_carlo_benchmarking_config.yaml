@@ -1,0 +1,37 @@
+num_simulations: 20  # Reduced for testing; increase to 100 for full runs
+#enable_visualization: true
+enable_visualization: false
+terrain_size: 20.0 # side of a square in meters using which a square shaped terrain (pointcloud .pcd) of area terrain_size*terrain_size is generated
+
+# hazardmetrics thresholds 
+min_radius_threshold: 2.5 # in meters
+max_slope_threshold: 25 # in degrees
+min_point_density_threshold: 30.0 # points/m²
+max_relief_threshold: 0.25 # in meters
+max_roughness_threshold: 0.02 # in meters
+
+#lzd common parameters if at all used by any
+max_landingZones: 1
+max_Attempts: 10000
+
+algorithms:
+  - name: Region_Growing_Segmentation
+    curvature_threshold: 0.05
+    min_cluster_size: 50
+    alpha: 0.1
+    cluster_tolerance: 0.25
+  - name: seq_overlap
+    cell_size: 1.0
+    alpha: 0.1
+    cluster_tolerance: 1.0
+  - name: kdtree_InflatingCircles
+    k: 30
+    radiusIncrement: 0.1
+  - name: sequentialApproachKdtree
+    cell_size: 1
+    alpha: 0.1
+    cluster_tolerance: 1.0
+  - name: sequentialApproach
+    cell_size: 1
+    alpha: 0.1
+    cluster_tolerance: 1.0

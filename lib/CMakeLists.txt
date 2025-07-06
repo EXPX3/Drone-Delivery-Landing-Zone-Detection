@@ -1,86 +1,129 @@
 cmake_minimum_required(VERSION 3.10)
 project(Test)
 
-# Use C++17
+# Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Enable warnings and optimizations
+add_compile_options(-Wall -Wextra -O3)
+
 # ----------------------------------------------------------------------------
-# 1. Find OPEN3D, PCL, and include the necessary modules
+# 1. Find dependencies
 # ----------------------------------------------------------------------------
 
-find_package(Open3D REQUIRED)
+# Find Eigen3
+find_package(Eigen3 REQUIRED)
+message(STATUS "Eigen3 found")
 
-find_package(PCL 1.15 REQUIRED COMPONENTS common filters io visualization segmentation surface integral_image_normal region_growing features)
+# Find PCL
+find_package(PCL 1.14 REQUIRED COMPONENTS common filters io visualization segmentation surface integral_image_normal region_growing features)
 message(STATUS "PCL_VERSION: ${PCL_VERSION}")
-include_directories(${PCL_INCLUDE_DIRS})
-add_definitions(${PCL_DEFINITIONS})
 
+# Find Open3D
+find_package(Open3D REQUIRED)
+message(STATUS "Open3D found")
 
-include_directories(
-  ${CMAKE_CURRENT_SOURCE_DIR}/include/
+# Find OctoMap
+find_package(octomap REQUIRED)
+message(STATUS "OctoMap found")
 
-)
+# Find CGAL
+find_package(CGAL REQUIRED)
+message(STATUS "CGAL found")
 
-# ----------------------------------------------------------------------------
-# 2. Optionally, find OpenMP if needed for parallelization
-# ----------------------------------------------------------------------------
+# Find grid_map_core
+find_library(GRID_MAP_CORE_LIBRARY NAMES grid_map_core PATHS /usr/local/lib)
+find_path(GRID_MAP_CORE_INCLUDE_DIR NAMES grid_map_core/GridMap.hpp PATHS /usr/local/include)
+if(NOT GRID_MAP_CORE_LIBRARY OR NOT GRID_MAP_CORE_INCLUDE_DIR)
+    message(FATAL_ERROR "grid_map_core not found")
+endif()
+message(STATUS "grid_map_core found")
+
+# Find VTK
+find_package(VTK REQUIRED)
+message(STATUS "VTK found")
+
+# Find OpenMP
 find_package(OpenMP REQUIRED)
-if(OPENMP_FOUND)
-    message(STATUS "OpenMP found. Linking to OpenMP libraries.")
+message(STATUS "OpenMP found")
+
+# Find yaml-cpp
+find_package(yaml-cpp QUIET)
+if(yaml-cpp_FOUND)
+    message(STATUS "yaml-cpp found")
+else()
+    message(WARNING "yaml-cpp not found, linking may fail if required")
 endif()
 
+# Find other libraries
+find_package(OpenGL REQUIRED)
+find_package(glfw3 QUIET)
+find_package(GLEW QUIET)
+find_package(assimp QUIET)
+find_package(PNG QUIET)
+find_package(JPEG QUIET)
+
 # ----------------------------------------------------------------------------
-# 3. Manually include other libraries' include paths
+# 2. Set include directories
 # ----------------------------------------------------------------------------
+
 include_directories(
-    /usr/local/include/eigen3
-    /usr/local/include/pcl-1.15
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${EIGEN3_INCLUDE_DIR}
+    ${PCL_INCLUDE_DIRS}
+    ${Open3D_INCLUDE_DIRS}
+    ${OCTOMAP_INCLUDE_DIRS}
+    ${CGAL_INCLUDE_DIRS}
+    ${GRID_MAP_CORE_INCLUDE_DIR}
+    ${VTK_INCLUDE_DIRS}
+    ${OPENGL_INCLUDE_DIRS}
+    ${yaml-cpp_INCLUDE_DIRS}
+    ${GLEW_INCLUDE_DIRS}
+    ${assimp_INCLUDE_DIRS}
+    ${PNG_INCLUDE_DIRS}
+    ${JPEG_INCLUDE_DIRS}
 )
 
 # ----------------------------------------------------------------------------
-# 4. Find VTK components (required by Open3D's third-party VTK modules)
+# 3. Set linker directories and definitions
 # ----------------------------------------------------------------------------
 
-find_package(VTK REQUIRED) 
-# If you want to specify them, do:
-# find_package(VTK REQUIRED COMPONENTS FiltersGeneral FiltersModeling FiltersCore CommonDataModel CommonExecutionModel)
+link_directories(${PCL_LIBRARY_DIRS})
+add_definitions(${PCL_DEFINITIONS})
 
+# ----------------------------------------------------------------------------
+# 4. Create executable
+# ----------------------------------------------------------------------------
 
-set(CMAKE_EXE_LINKER_FLAGS
-    "${CMAKE_EXE_LINKER_FLAGS} -Wl,--copy-dt-needed-entries"
-)
-# ----------------------------------------------------------------------------
-# 5. Create the executables
-# ----------------------------------------------------------------------------
 add_executable(main main.cpp)
 
 # ----------------------------------------------------------------------------
-# 6. Link libraries
+# 5. Link libraries
 # ----------------------------------------------------------------------------
 
-# Link libraries.
 target_link_libraries(main
-  OpenMP::OpenMP_CXX
-  yaml-cpp 
-  Open3D::Open3D 
-  ${PCL_LIBRARIES}
-  ${OCTOMAP_LIBRARIES}  
-  GL                     # -lGL
-  GLU                    # -lGLU
-  glfw                   # -lglfw
-  GLEW                   # -lGLEW
-  assimp                 # -lassimp
-  jsoncpp               # -ljsoncpp
-  jpeg                   # -ljpeg
-  png                    # -lpng
-  z                      # -lz
-  pthread                # -lpthread
+    OpenMP::OpenMP_CXX
+    yaml-cpp
+    Open3D::Open3D
+    ${PCL_LIBRARIES}
+    ${OCTOMAP_LIBRARIES}
+    CGAL::CGAL
+    ${GRID_MAP_CORE_LIBRARY}
+    Eigen3::Eigen
+    ${VTK_LIBRARIES}
+    ${OPENGL_LIBRARIES}
+    ${GLFW3_LIBRARIES}
+    ${GLEW_LIBRARIES}
+    ${assimp_LIBRARIES}
+    ${PNG_LIBRARIES}
+    ${JPEG_LIBRARIES}
+    z
+    pthread
 )
 
 # ----------------------------------------------------------------------------
-# 7. Add OpenMP flags
+# 6. Optional linker flags
 # ----------------------------------------------------------------------------
-if(OPENMP_FOUND)
-    target_compile_options(main PRIVATE ${OpenMP_CXX_FLAGS})
-endif()
+
+target_link_options(main PRIVATE -Wl,--copy-dt-needed-entries)
