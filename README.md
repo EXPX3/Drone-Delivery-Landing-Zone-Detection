@@ -11,11 +11,11 @@ Implemented algorithms to date and included in the Monte-carlo based benchmarkin
     1.5 sequentialApproach
 
 
-![Region_Growing_Segmentation](Drone-Delivery-Landing-Zone-Detection/media/regiongrowingseg.drawio.png)
+![Region_Growing_Segmentation](media/regiongrowingseg.drawio.png)
 
-![seq_overlap](Drone-Delivery-Landing-Zone-Detection/media/seq_throry_imple_resul.drawio.png)
+![seq_overlap](media/seq_throry_imple_resul.drawio.png)
 
-![kdtree_InflatingCircles](Drone-Delivery-Landing-Zone-Detection/media/inflating_circleskdtree.drawio.png)
+![kdtree_InflatingCircles](media/inflating_circleskdtree.drawio.png)
 
 Note: For detailed explaination of implementation with flow charts and pseudo code refere to the paper published here (published by end of aug 2025).
 
