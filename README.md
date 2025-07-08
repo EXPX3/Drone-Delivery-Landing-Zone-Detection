@@ -52,6 +52,9 @@ We use a `.yaml` file to configure algorithm selection and their parameters. You
 
 Drone-Delivery-Landing-Zone-Detection/lib/config/monte_carlo_benchmarking_config.yaml
 
+## Other Useful links relavant to topic:
+- https://github.com/EXPX3/Everything-Drone-Delivery-Pickup-and-Landing
+
 
 > **Note**: More details will be added soon.
 
