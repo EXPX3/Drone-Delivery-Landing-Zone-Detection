@@ -1,6 +1,6 @@
 # Drone-Delivery-Landing-Zone-Detection
 
-Work In Progress!
+Existing state of the work will be released after the research paper is published most probably by end of July. Work In Progress! 
 
 **Algorithms and Benchmarking Strategies**
 
