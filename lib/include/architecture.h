@@ -90,14 +90,6 @@ struct CellSlope {
     Eigen::Vector3f centroid;
 };
 
-// Hash function for grid cells
-struct GridHash {
-    size_t operator()(const std::pair<int, int>& k) const {
-        return std::hash<int>()(k.first) ^ (std::hash<int>()(k.second) << 1);
-    }
-};
-
-
 
 // VISUALIZATION RELATED FUNCTIONS ......................................................................................................
 // Function to visualize clustered patches with different colors
@@ -790,54 +782,6 @@ CircleFitResult checkVerticalCollisionAndHazardMetrics(
     }
 
     return output_result;
-}
-
-// HeightMap generation function
-PointCloudPcl createHeightMap(const PointCloud& pointcloud, float grid_resolution) {
-    PointCloudPcl output(new pcl::PointCloud<PointPcl>());
-
-    std::unordered_map<std::pair<int, int>, float, GridHash> height_map;
-
-    // Helper lambda to process points
-    auto process_point = [&](float x, float y, float z) {
-        int xi = std::floor(x / grid_resolution);
-        int yi = std::floor(y / grid_resolution);
-
-        auto key = std::make_pair(xi, yi);
-
-        if (height_map.find(key) == height_map.end() || height_map[key] < z) {
-            height_map[key] = z;
-        }
-    };
-
-    // Process depending on input type
-    if (std::holds_alternative<PointCloudPcl>(pointcloud)) {
-        auto pcl_cloud = std::get<PointCloudPcl>(pointcloud);
-        for (const auto& pt : pcl_cloud->points) {
-            process_point(pt.x, pt.y, pt.z);
-        }
-    } else {
-        auto o3d_cloud = std::get<PointCloudOpen3D>(pointcloud);
-        for (const auto& pt : o3d_cloud->points_) {
-            process_point(pt.x(), pt.y(), pt.z());
-        }
-    }
-
-    // Convert height_map back to pointcloud
-    for (const auto& [key, z_val] : height_map) {
-        PointPcl pt;
-        pt.x = (key.first + 0.5f) * grid_resolution;
-        pt.y = (key.second + 0.5f) * grid_resolution;
-        pt.z = z_val;
-        pt.intensity = z_val; // optional, for visualization
-        output->points.push_back(pt);
-    }
-
-    output->width = output->points.size();
-    output->height = 1;
-    output->is_dense = true;
-
-    return output;
 }
 
 std::vector<Eigen::Vector3d> computeAlphaShapeBoundary3D(
