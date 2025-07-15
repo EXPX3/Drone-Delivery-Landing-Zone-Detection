@@ -1,6 +1,6 @@
 # Drone-Delivery-Landing-Zone-Detection
 
-Work In Progress!
+Existing state of the work will be released after the research paper is published most probably by end of August. Work In Progress! 
 
 **Algorithms and Benchmarking Strategies**
 
@@ -51,6 +51,9 @@ Synthetic point clouds generated:
 We use a `.yaml` file to configure algorithm selection and their parameters. You will find the self-explanatory file at the following path:
 
 Drone-Delivery-Landing-Zone-Detection/lib/config/monte_carlo_benchmarking_config.yaml
+
+## Other Useful links relavant to topic:
+- https://github.com/EXPX3/Everything-Drone-Delivery-Pickup-and-Landing
 
 
 > **Note**: More details will be added soon.
