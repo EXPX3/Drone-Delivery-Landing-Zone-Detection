@@ -1,0 +1,45 @@
+# Ignore the build folder and its contents
+build/
+
+# Compiled object files
+*.o
+*.obj
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Libraries
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+
+# Precompiled headers
+*.gch
+*.pch
+
+# Dependency files
+*.d
+
+# Temporary files
+*.swp
+*~
+
+# Log files
+*.log
+
+# vscode files
+.vscode/
+
+*.bin
+# *.csv
+# *.png
+# *.jpg
+# *.jpeg
+
+*.pcd
+/results
+
