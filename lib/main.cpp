@@ -3,7 +3,6 @@
 #include "yaml-cpp/yaml.h"
 #include "common.h"
 #include "hazard_metrices.h"
-#include "pointcloud_preprocessing.h"
 #include "architecture.h"
 
 using PointT = pcl::PointXYZI;
