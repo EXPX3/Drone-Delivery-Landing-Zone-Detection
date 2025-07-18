@@ -1,5 +1,5 @@
 # Ignore the build folder and its contents
-build/
+build
 
 # Compiled object files
 *.o
@@ -41,5 +41,5 @@ build/
 # *.jpeg
 
 *.pcd
-/results
+results
 

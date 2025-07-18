@@ -1,98 +1,179 @@
-# Drone-Delivery-Landing-Zone-Detection Algorithms and Benchmarking Strategies
 
-Work In Progress!
+# Drone-Delivery-Landing-Zone-Detection: Algorithms & Benchmarking Framework 🚁📦
 
-This repository consists of two things mainly as title suggests.
-- Drone-Delivery-Landing-Zone-Detection Algorithms
-- Proposed Benchmarking Strategy for these algorithms
+> **Work In Progress!**
 
-Configuring the benchmarking framework:
-The .yaml file present in lib/config/monte_carlo_benchmarking_config.yaml allows to configure the benchmarking parameters like pre-set heuristic hazard metrics specific to the UAV and your use case, algorithms to be benchmarked etc (will be elaborated as needed with addition of new algorithms).
-
-Currently implemented algorithms can be found at lib/include/architecture.h under the commented line // ALGORITHMS ..............
-
-To start the benchmarking do the following:
-
-- ensure the nvida drivers and container toolkit are installed. 
-
-- use the provided docker image that has all the required libraries installed.
-
-    docker pull giri6937/lam:latest
-
-
-- Clone this repo to a workspace that can be mounted into docker container
-
-    cd to/your/desired/workspace
-    git clone https://github.com/EXPX3/Drone-Delivery-Landing-Zone-Detection.git
-
-- run the docker container and mount the repo into it with the below command
-
-    sudo docker run --name DDLZD --rm -it --privileged -e DISPLAY=$DISPLAY -e XAUTHORITY=$XAUTHORITY -v /tmp/.X11-unix:/tmp/.X11-unix -v /PATH_TO_YOUR_CLONED_REPO_DIR/Drone-Delivery-Landing-Zone-Detection:/home/airsim_user/Drone-Delivery-Landing-Zone-Detection --gpus all --network host --entrypoint /bin/bash giri6937/lam:latest
-
-- inside the docker container run the below command to enter the cloned repo
-
-    cd /home/airsim_user/Drone-Delivery-Landing-Zone-Detection
-
-- to build the lib inside the cloned repo do the following
-
-    cd lib  
-    mkdir build
-    cd build
-    cmake ..
-    make 
-- once the build is successfull you should be able to see a executable file named main
-- It is time to configure the .yaml file, for initial test set number of iterations to 1, ensure visualization is set to true to see the generated pointcloud for each run with varying parameter values within a provided range. 
-- once configured execute the generated main executable as follows ...
-
-    ./main
-
-- with poppedup window with generated pointcloud active use mouse wheel to zoom in and out, press q to exit the window and continue the simulation to next step.
-- with num of iterations set to 1, in total you will be pressing q for 125 times, given 5 hazardmetrics with varying each metric over a range of 5 values for 5 different algorithms..
-- Ofcourse to get valid benchmarking results you should set the vizualization to false and num of iterations to at least 20 or more.
-
-
-To test the algorithms implemented on your own pointcloud do the following:
-
-- exit the container started before as we will be mounting your .pcd while starting it.
-- change the config_path value to point to algo_testing_config.yaml instead of monte_carlo_benchmarking_config.yaml
-
-- use the provide test.pcd file or mount the directory containing your .pcd while running the docker container as follows.  
-    
-    sudo docker run --name DDLZD --rm -it --privileged -e DISPLAY=$DISPLAY -e XAUTHORITY=$XAUTHORITY -v /tmp/.X11-unix:/tmp/.X11-unix -v /PATH_TO_YOUR_CLONED_REPO_DIR/Drone-Delivery-Landing-Zone-Detection:/home/airsim_user/Drone-Delivery-Landing-Zone-Detection -v /PATH_TO_YOUR_OWN_PCD_FILES/pcds:/home/airsim_user/Drone-Delivery-Landing-Zone-Detection/pcds --gpus all --network host --entrypoint /bin/bash giri6937/lam:latest
-
-- set your .pcd file path inside algo_testing_config.yaml relative to the docker container filesystem
-- enable viszualization
-- when a window pops out to vizualize the loaded pointcloud at the moment the window origin is not set to the load pointcloud origin, so you need to zoom out a couple of wheels to find the pointcloud.
-. press q to close the window. This lets the process continue. You will be shown the results specific to specific algorithms. you will also see xz projections of potential landing delivery zone candidates, followd by the final selected candidates if the algorithm finds any. Note that there are some pre-set threshold values in place specific to an UAV and usecase so make sure you tune them to your specifc need when testing on your own .pcd.
-
-
-## Simulation framework
-![Simulation framework](media/simulation_framework.drawio_color.png)
-
-
-Implemented algorithms to date and included in the Monte-carlo based benchmarking strategy.
-
-### Algorithms Implemented
-
-1. **Traditional Rule-Based Mathematical Models with Preset Heuristic Rules**:
-    - Region_Growing_Segmentation
-    - seq_overlap
-    - kdtree_InflatingCircles
-    - sequentialApproachKdtree
-    - sequentialApproach
+This repository focuses on two core components:
+- 🧠 **Drone-Delivery-Landing-Zone-Detection (DLZD) Algorithms**
+- 📊 **Proposed Benchmarking Strategy** for evaluating those algorithms
 
 ---
 
+## 📁 Benchmarking Framework Configuration
 
-## Visualizations
+The benchmarking parameters—such as pre-set heuristic hazard metrics specific to the UAV and use case—can be configured in:
 
-### Algorithm Visualizations
+```
+lib/config/monte_carlo_benchmarking_config.yaml
+```
 
-| Algorithm                     | Visualization                              |
-|-------------------------------|--------------------------------------------|
-| **Region_Growing_Segmentation** | ![Region_Growing_Segmentation](media/regiongrowingseg.drawio.png) |
-| **seq_overlap**               | ![seq_overlap](media/seq_throry_imple_resul.drawio.png)          |
-| **kdtree_InflatingCircles**   | ![kdtree_InflatingCircles](media/inflating_circleskdtree.drawio.png) |
+More options will be added as new algorithms are integrated.
+
+🧠 **Currently implemented algorithms** are listed in:
+
+```
+lib/include/architecture.h
+```
+
+Look under the comment:
+```cpp
+// ALGORITHMS ..............
+```
+
+---
+
+## 🚀 Quickstart
+
+### 1. Environment Setup
+
+> **Note**: If using NVIDIA GPU, ensure that NVIDIA drivers and the container toolkit are installed.
+
+Pull the pre-built Docker image with all dependencies:
+
+```bash
+docker pull giri6937/lam:latest
+```
+
+Clone the repository:
+
+```bash
+cd /your/desired/workspace
+git clone https://github.com/EXPX3/Drone-Delivery-Landing-Zone-Detection.git
+```
+
+Run the Docker container and mount the repository:
+
+```bash
+sudo docker run --name DDLZD --rm -it --privileged \
+-e DISPLAY=$DISPLAY -e XAUTHORITY=$XAUTHORITY \
+-v /tmp/.X11-unix:/tmp/.X11-unix \
+-v /PATH_TO_YOUR_CLONED_REPO_DIR/Drone-Delivery-Landing-Zone-Detection:/home/airsim_user/Drone-Delivery-Landing-Zone-Detection \
+--gpus all --network host --entrypoint /bin/bash giri6937/lam:latest
+```
+
+> Skip `--gpus all` if not using GPU.
+
+---
+
+### 2. Building the Project
+
+Inside the container:
+
+```bash
+cd /home/airsim_user/Drone-Delivery-Landing-Zone-Detection/lib
+mkdir build && cd build
+cmake ..
+make
+```
+
+A successful build generates an executable named `main`.
+
+---
+
+### 3. Running the Benchmark
+
+Configure the YAML file first. For a quick test:
+- Set `iterations: 1`
+- Enable `visualization: true` to observe point cloud generation
+
+Run the benchmark:
+
+```bash
+./main
+```
+
+> **Note**: You'll need to press `q` 175 times in total for a single iteration over 5 hazard metrics × 7 values × 5 algorithms, so feel free to stop the main by pressing ctrl + c after seeing the process visually for few steps.
+
+For full benchmarking:
+- Set `visualization: false`
+- Set `iterations: 20` or more. More iterations more time more accuracy of results. Note: after certain number of iterations results might not change much.
+
+Results are saved in:
+
+```
+Drone-Delivery-Landing-Zone-Detection/results/
+```
+
+---
+
+### 4. Plotting the Results 📈
+
+Activate your Python virtual environment and run:
+
+```bash
+python Drone-Delivery-Landing-Zone-Detection/scripts/results_plotter.py
+```
+
+Plots will be saved under a timestamped folder:
+
+```
+results/results_<timestamp>/plots_<timestamp>/
+```
+
+---
+
+## 🧪 Testing on Your Own Point Cloud
+
+1. Exit the current container session.
+2. Update `config_path` to use `algo_testing_config.yaml`.
+3. Mount your PCD directory:
+
+```bash
+sudo docker run --name DDLZD --rm -it --privileged \
+-e DISPLAY=$DISPLAY -e XAUTHORITY=$XAUTHORITY \
+-v /tmp/.X11-unix:/tmp/.X11-unix \
+-v /PATH_TO_YOUR_CLONED_REPO_DIR/Drone-Delivery-Landing-Zone-Detection:/home/airsim_user/Drone-Delivery-Landing-Zone-Detection \
+-v /PATH_TO_YOUR_OWN_PCD_FILES/pcds:/home/airsim_user/Drone-Delivery-Landing-Zone-Detection/pcds \
+--gpus all --network host --entrypoint /bin/bash giri6937/lam:latest
+```
+
+4. Set your `.pcd` path in `algo_testing_config.yaml`.
+5. Enable visualization and run the test.
+
+> Zoom out if the point cloud is not immediately visible. Press `q` to continue the process.
+
+---
+
+## 🧱 Simulation Framework
+
+![Simulation framework](media/simulation_framework.drawio_color.png)
+
+---
+
+## ✅ Implemented Algorithms
+
+### 1. Traditional Rule-Based Models with Heuristic Rules
+- `Region_Growing_Segmentation`
+- `seq_overlap`
+- `kdtree_InflatingCircles`
+- `sequentialApproachKdtree`
+- `sequentialApproach`
+
+> These algorithms are integrated into the Monte Carlo-based benchmarking strategy.
+
+---
+
+## 🎥 Visualizations
+
+### Algorithm Demonstrations
+
+| Algorithm                   | Visualization |
+|----------------------------|----------------|
+| Region_Growing_Segmentation | ![Region_Growing_Segmentation](media/regiongrowingseg.drawio.png) |
+| seq_overlap                | ![seq_overlap](media/seq_throry_imple_resul.drawio.png) |
+| kdtree_InflatingCircles    | ![kdtree_InflatingCircles](media/inflating_circleskdtree.drawio.png) |
+
+---
 
 ### Synthetic Point Clouds
 
@@ -100,16 +181,23 @@ Synthetic point clouds generated:
 
 ![synthetic_pointcloud](media/synthetic_pointcloud.drawio.png)
 
-> **Note**: For detailed explanation of implementation with flow charts and pseudo code, refer to the paper published here (published by end of Aug 2025).
+> **Note**: For a detailed explanation of the implementation with flow charts and pseudocode, refer to the paper published here (to be released by end of August 2025).
 
 ---
 
-## Configuration
+## ⚙️ Configuration
 
-We use a `.yaml` file to configure algorithm selection and their parameters. You will find the self-explanatory file at the following path:
+We use a `.yaml` file to configure algorithm selection and their parameters. You will find the self-explanatory file at:
 
+```
 Drone-Delivery-Landing-Zone-Detection/lib/config/monte_carlo_benchmarking_config.yaml
+```
 
+---
+
+## 📌 What’s Next
+
+- Adding a DL-based DLZD algorithm and benchmarking it.
 
 > **Note**: More details will be added soon.
 
