@@ -1,4 +1,4 @@
-num_simulations: 20  # Reduced for testing; increase to 100 for full runs
+num_simulations: 1  # Reduced for testing; increase to 100 for full runs
 #enable_visualization: true
 enable_visualization: false
 terrain_size: 20.0 # side of a square in meters using which a square shaped terrain (pointcloud .pcd) of area terrain_size*terrain_size is generated

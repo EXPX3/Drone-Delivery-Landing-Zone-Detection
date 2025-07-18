@@ -523,8 +523,8 @@ public:
 
 // Main function
 int main() {
-    //std::string config_path = "/home/airsim_user/Landing-Assist-Module-LAM/lib/config/monte_carlo_benchmarking_config.yaml";algo_testing_config_local
-    std::string config_path = "/home/airsim_user/Landing-Assist-Module-LAM/lib/config/algo_testing_config_local.yaml";
+    std::string config_path = "/home/airsim_user/Drone-Delivery-Landing-Zone-Detection/lib/config/monte_carlo_benchmarking_config.yaml";
+    //std::string config_path = "/home/airsim_user/Drone-Delivery-Landing-Zone-Detection/lib/config/algo_testing_config_local.yaml";
 
     YAML::Node config;
     try {
@@ -549,7 +549,10 @@ int main() {
     }
 
     int num_simulations = config["num_simulations"].as<int>(100);
-    int total_num_simulations = num_simulations * 5 * 7;
+    int num_hazard_metrics = 5; 
+    int num_algorithms = 5; 
+    int num_of_discrete_values_per_hazard_metric = 7;
+    int total_num_simulations = num_simulations * num_hazard_metrics * num_algorithms * num_of_discrete_values_per_hazard_metric;
     bool enable_visualization = config["enable_visualization"].as<bool>(false);
 
     double min_radius_threshold = config["min_radius_threshold"].as<double>(2.5);
@@ -569,7 +572,7 @@ int main() {
     std::time_t now = std::time(nullptr);
     char timestamp[20];
     std::strftime(timestamp, sizeof(timestamp), "%Y%m%d_%H%M%S", std::localtime(&now));
-    std::string base_dir = "/home/airsim_user/Landing-Assist-Module-LAM/results";
+    std::string base_dir = "/home/airsim_user/Drone-Delivery-Landing-Zone-Detection/results";
     std::string output_dir = base_dir + "/results_" + timestamp + "_" + std::to_string(terrain_size_int) + "mX" + std::to_string(terrain_size_int) + "m_totalSimNum" + std::to_string(total_num_simulations);
 
     if (!std::filesystem::exists(base_dir)) {

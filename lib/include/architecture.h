@@ -76,13 +76,6 @@ struct RankedCandidate {
     int rank;               // Rank (1-based, lower is better)
 };
 
-
-struct sequentialOverlapResult {
-    std::vector<CellSlope> cell_slopes;             // Slopes and metadata for valid cells
-    pcl::PointIndices inlier_indices;               // Indices of inlier points in input cloud
-    std::vector<pcl::PointIndices> cluster_indices; // Single entry with inlier indices for visualization
-};
-
 // Structure to hold slope and cell index
 struct CellSlope {
     int index;
@@ -90,6 +83,11 @@ struct CellSlope {
     Eigen::Vector3f centroid;
 };
 
+struct sequentialOverlapResult {
+    std::vector<CellSlope> cell_slopes;             // Slopes and metadata for valid cells
+    pcl::PointIndices inlier_indices;               // Indices of inlier points in input cloud
+    std::vector<pcl::PointIndices> cluster_indices; // Single entry with inlier indices for visualization
+};
 
 // VISUALIZATION RELATED FUNCTIONS ......................................................................................................
 // Function to visualize clustered patches with different colors
