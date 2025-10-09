@@ -28,7 +28,12 @@ Look under the comment:
 ```cpp
 // ALGORITHMS ..............
 ```
-
+- kdtreeNeighbourhoodPCAFilterOMP -> Kdtree based nearest neighbourhood point search applied to inflating circles algorithm
+- sequentialOverlappingApproach -> Voxelized pointcloud is processed sequentially voxel wise with adjustable overalpping between each voxels
+- sequentialApproach -> Voxelized pointcloud is processed sequentially voxel wise
+- sequentialApproachKdtree -> Kdtree based nearest neighbour point search and sequentially processing
+- segmentPointCloud -> Region Growing segmentation based 
+For detailed explaination please refer the published paper at Drone-Delivery-Landing-Zone-Detection/media/DASC_2025.pdf
 ---
 
 ## 🚀 Quickstart
