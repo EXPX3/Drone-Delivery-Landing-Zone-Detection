@@ -34,7 +34,7 @@ Look under the comment:
 - sequentialApproachKdtree -> Kdtree based nearest neighbour point search and sequentially processing
 - segmentPointCloud -> Region Growing segmentation based
  
-## * For detailed explaination of the algorithms please refer the published paper -> Drone-Delivery-Landing-Zone-Detection/media/DASC_2025.pdf
+## * For detailed explaination of the algorithms please refer the published paper -> Drone-Delivery-Landing-Zone-Detection/media/dasc2025vittabukka.pdf
 ---
 
 ## 🚀 Quickstart
