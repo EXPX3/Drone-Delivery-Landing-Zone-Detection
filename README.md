@@ -1,5 +1,5 @@
 
-# Drone-Delivery-Landing-Zone-Detection: Algorithms & Benchmarking Framework 🚁📦
+# Drone-Delivery-Landing-Zone-Detection: Algorithms & Benchmarking Framework 
 
 
 This repository focuses on two core components:
