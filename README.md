@@ -1,7 +1,6 @@
 
 # Drone-Delivery-Landing-Zone-Detection: Algorithms & Benchmarking Framework 🚁📦
 
-> **Work In Progress!**
 
 This repository focuses on two core components:
 - 🧠 **Drone-Delivery-Landing-Zone-Detection (DLZD) Algorithms**
