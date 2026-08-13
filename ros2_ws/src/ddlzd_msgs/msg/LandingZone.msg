@@ -1,0 +1,30 @@
+uint8 UNKNOWN=0
+uint8 SAFEST=1
+uint8 SAFE=2
+uint8 RISKY=3
+
+uint64 id
+geometry_msgs/Pose pose
+geometry_msgs/Vector3 normal
+float32 radius
+float32 risk_score
+uint8 category
+bool geometry_valid
+bool camera_valid
+bool temporally_stable
+uint32 consecutive_observations
+
+float32 slope_deg
+float32 point_density_m2
+float32 relief_m
+float32 roughness_m
+uint32 obstacle_count
+float32 nearest_obstacle_clearance_m
+float32 observed_fraction
+float32 clearance_observed_fraction
+float32 camera_coverage_fraction
+float32 tree_fraction
+float32 tree_score
+float32 grass_fraction
+float32 texture_risk
+string rejection_reason

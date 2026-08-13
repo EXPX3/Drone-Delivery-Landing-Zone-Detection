@@ -1,0 +1,76 @@
+/landing_zone/live_landing_zone:
+  ros__parameters:
+    # Hardware topics and target_frame are supplied by required launch arguments.
+    input_is_motion_compensated: false
+    deskew_tf_sampling_sec: 0.002
+    rolling_window_sec: 3.0
+    detection_period_sec: 0.5
+    local_map_radius_m: 30.0
+    sync_tolerance_sec: 0.05
+    image_buffer_sec: 2.0
+    tf_timeout_sec: 0.10
+    max_cloud_age_sec: 0.5
+    max_scan_duration_sec: 0.5
+
+    detector:
+      # landing_radius_m is intentionally not configurable: this branch enforces 2.5 m.
+      # The exact-radius demo uses no expansion; set from a measured navigation/control error budget if required.
+      safety_margin_m: 0.0
+      obstacle_search_radius_m: 12.0
+      candidate_spacing_m: 0.75
+      nms_distance_m: 1.0
+      voxel_leaf_m: 0.10
+      plane_inlier_threshold_m: 0.08
+      region_smoothness_deg: 6.0
+      curvature_threshold: 0.08
+      obstacle_height_m: 0.50
+      max_slope_deg: 12.0
+      min_density_m2: 8.0
+      max_relief_m: 5.0
+      max_roughness_m: 2.0
+      min_observed_fraction: 0.70
+      min_plane_points: 120
+      normal_neighbors: 30
+      obstacle_min_points: 20
+      angular_bins: 36
+      radial_bins: 5
+      max_candidates: 200
+
+    semantic:
+      # Fixed scales avoid the frame-relative percentile instability in the offline script.
+      exg_low: 0.02
+      exg_high: 0.35
+      vari_low: 0.02
+      vari_high: 0.45
+      saturation_low: 0.10
+      saturation_high: 0.75
+      texture_low: 0.015
+      texture_high: 0.18
+      tree_threshold: 0.70
+      grass_threshold: 0.55
+      occlusion_tolerance_m: 0.15
+      evidence_angular_bins: 36
+      evidence_radial_bins: 5
+
+    risk:
+      safest_threshold: 0.33
+      safe_threshold: 0.62
+      minimum_camera_coverage: 0.55
+      minimum_clearance_coverage: 0.55
+      slope_good_deg: 0.0
+      slope_bad_deg: 8.0
+      relief_good_m: 0.10
+      relief_bad_m: 4.50
+      roughness_good_m: 0.03
+      roughness_bad_m: 0.55
+      clearance_bad_m: 2.0
+      clearance_good_m: 12.0
+      obstacle_bad_count: 80.0
+      observed_bad_fraction: 0.70
+      observed_good_fraction: 0.95
+
+    tracking:
+      match_distance_m: 1.0
+      timeout_sec: 2.0
+      risk_filter_alpha: 0.35
+      minimum_stable_observations: 3

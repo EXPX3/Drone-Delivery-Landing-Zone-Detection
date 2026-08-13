@@ -1,0 +1,33 @@
+FROM nvcr.io/nvidia/isaac/ros:aarch64-ros2_humble_77e6a678c2058abf96bedcb8f7dd4330
+
+SHELL ["/bin/bash", "-lc"]
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libeigen3-dev \
+    libopencv-dev \
+    libpcl-dev \
+    python3-colcon-common-extensions \
+    ros-humble-cv-bridge \
+    ros-humble-diagnostic-msgs \
+    ros-humble-ouster-ros \
+    ros-humble-pcl-conversions \
+    ros-humble-pcl-ros \
+    ros-humble-rmw-cyclonedds-cpp \
+    ros-humble-tf2-eigen \
+    ros-humble-tf2-sensor-msgs \
+    ros-humble-visualization-msgs
+
+ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+WORKDIR /ros2_ws
+COPY ros2_ws/src /ros2_ws/src
+
+RUN source /opt/ros/humble/setup.bash \
+ && rosdep update \
+ && rosdep install --from-paths src --ignore-src -r -y \
+ && colcon build --merge-install --cmake-args -DCMAKE_BUILD_TYPE=Release \
+ && rm -rf build log /var/lib/apt/lists/*
+
+COPY docker/ros_entrypoint_live.sh /ros_entrypoint_live.sh
+ENTRYPOINT ["/ros_entrypoint_live.sh"]
+CMD ["bash"]
