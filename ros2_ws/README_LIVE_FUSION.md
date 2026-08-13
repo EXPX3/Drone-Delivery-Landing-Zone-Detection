@@ -106,6 +106,52 @@ docker build --network=host \
 
 Run `docker/configure_ouster_network.sh` as root on the Jetson host at boot. Run the container with host networking so Ouster UDP traffic and CycloneDDS discovery are available.
 
+The complete reproducible host/container sequence is:
+
+```bash
+git clone --branch live_demo_cargopack --single-branch \
+  https://github.com/EXPX3/Drone-Delivery-Landing-Zone-Detection.git
+cd Drone-Delivery-Landing-Zone-Detection
+
+sudo docker/configure_ouster_network.sh
+docker build --network=host \
+  --file docker/Dockerfile.live_demo_cargopack \
+  --tag ddlzd-live:humble .
+
+xhost +si:localuser:root
+docker run --rm --interactive --tty \
+  --network host \
+  --runtime nvidia \
+  --env DISPLAY \
+  --env QT_X11_NO_MITSHM=1 \
+  --volume /tmp/.X11-unix:/tmp/.X11-unix:rw \
+  --volume /etc/localtime:/etc/localtime:ro \
+  --name ddlzd-live \
+  ddlzd-live:humble
+```
+
+`--runtime nvidia` is required on JetPack Docker installations that use the NVIDIA runtime. If the target uses the NVIDIA Container Toolkit CDI interface instead, use that deployment's documented GPU flag. Do not run the detector with both forms simultaneously.
+
+The image entrypoint sources ROS 2 Humble and `/ros2_ws/install/setup.bash`. Commands below are therefore entered directly in the container shell.
+
+## One configuration file
+
+All non-hardware parameters are in:
+
+```text
+/ros2_ws/install/share/ddlzd_ros/config/live_fusion.yaml
+```
+
+The source file is `ros2_ws/src/ddlzd_ros/config/live_fusion.yaml`. It contains the selected `region_growing_exact_radius` algorithm, exact-radius detector thresholds, rolling-window and deskew timing, semantic evidence, risk normalizers, temporal tracking, and observation-coverage requirements. Unsupported algorithm names fail configuration instead of silently selecting another implementation.
+
+Hardware bindings remain required launch arguments because the repository cannot know the deployed OS1 address, time source, Gremsy topics, or gravity-aligned frame. To use a modified parameter file mounted at runtime:
+
+```bash
+--volume /absolute/path/live_fusion.yaml:/config/live_fusion.yaml:ro
+```
+
+and pass `config_file:=/config/live_fusion.yaml` to the launch command.
+
 ## Launch
 
 The integrated launch has no hardware defaults. Each required launch argument must be the real value from the deployed system:
@@ -117,10 +163,20 @@ ros2 launch ddlzd_ros live_ouster_gremsy.launch.py \
   timestamp_mode:="${OS1_TIMESTAMP_MODE:?set OS1_TIMESTAMP_MODE}" \
   image_topic:="${GREMSY_RECTIFIED_IMAGE_TOPIC:?set GREMSY_RECTIFIED_IMAGE_TOPIC}" \
   camera_info_topic:="${GREMSY_CAMERA_INFO_TOPIC:?set GREMSY_CAMERA_INFO_TOPIC}" \
-  target_frame:="${GRAVITY_ALIGNED_LOCAL_FRAME:?set GRAVITY_ALIGNED_LOCAL_FRAME}"
+  target_frame:="${GRAVITY_ALIGNED_LOCAL_FRAME:?set GRAVITY_ALIGNED_LOCAL_FRAME}" \
+  config_file:=/ros2_ws/install/share/ddlzd_ros/config/live_fusion.yaml \
+  use_rviz:=true
 ```
 
-The launch configures Ouster `point_type=original`, disables organization, starts only PCL and IMU processors, and enables reconnection. The detector is automatically configured and activated through its lifecycle transitions.
+This single launch command starts the official Ouster driver, its point-cloud and IMU processors, the lifecycle landing-zone node, automatic configure/activate transitions, and RViz. It configures Ouster `point_type=original` so the live node receives the per-point `t` field needed for deskew, disables organized output, subscribes the detector to `/ouster/points`, and enables driver reconnection. The Gremsy camera publisher and calibrated/gimbal TF publisher must already be running because their vendor-specific node and interfaces are not part of this repository.
+
+The integrated live path is therefore:
+
+```text
+OS1 UDP -> ouster_ros -> /ouster/points -> deskew + rolling map -> exact 2.5 m geometry
+Gremsy rectified image + CameraInfo + timestamped gimbal TF -> RGB projection -> risk fusion
+fusion -> LandingZoneArray + live cloud + colored RViz MarkerArray + annotated image
+```
 
 For an existing driver and processing graph:
 
@@ -130,7 +186,31 @@ ros2 launch ddlzd_ros live_fusion_only.launch.py \
   image_topic:="${GREMSY_RECTIFIED_IMAGE_TOPIC:?set GREMSY_RECTIFIED_IMAGE_TOPIC}" \
   camera_info_topic:="${GREMSY_CAMERA_INFO_TOPIC:?set GREMSY_CAMERA_INFO_TOPIC}" \
   target_frame:="${GRAVITY_ALIGNED_LOCAL_FRAME:?set GRAVITY_ALIGNED_LOCAL_FRAME}" \
-  input_is_motion_compensated:=true
+  input_is_motion_compensated:=true \
+  config_file:=/ros2_ws/install/share/ddlzd_ros/config/live_fusion.yaml \
+  use_rviz:=true
+```
+
+Use `input_is_motion_compensated:=false` only when that input preserves the Ouster `original` `t` field and the required scan-duration TF is available. Use `true` only when the upstream component has already registered every point into `target_frame` at the message timestamp.
+
+To run RViz on a separate workstation instead of inside the Jetson container, set `use_rviz:=false`, source a ROS 2 Humble environment on the workstation, use the same CycloneDDS domain/network configuration, and run:
+
+```bash
+rviz2 -d /path/to/live_landing_zones.rviz \
+  -f "${GRAVITY_ALIGNED_LOCAL_FRAME:?set GRAVITY_ALIGNED_LOCAL_FRAME}"
+```
+
+In RViz, `Live registered point cloud` displays the rolling cloud actually evaluated by the detector. `Landing-zone categories` displays exact 2.5 m circles: green is `SAFEST`, orange is `SAFE`, red is `RISKY`, and gray is `UNKNOWN`. Both topics update on every completed live detection snapshot.
+
+Useful verification commands are:
+
+```bash
+ros2 topic hz /ouster/points
+ros2 topic echo /landing_zone/live_landing_zone/zones --once
+ros2 topic hz /landing_zone/live_landing_zone/local_cloud
+ros2 topic hz /landing_zone/live_landing_zone/markers
+ros2 lifecycle get /landing_zone/live_landing_zone
+ros2 topic echo /diagnostics --once
 ```
 
 ## Outputs

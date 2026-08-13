@@ -13,6 +13,7 @@
     max_scan_duration_sec: 0.5
 
     detector:
+      algorithm: region_growing_exact_radius
       # landing_radius_m is intentionally not configurable: this branch enforces 2.5 m.
       # The exact-radius demo uses no expansion; set from a measured navigation/control error budget if required.
       safety_margin_m: 0.0

@@ -48,7 +48,7 @@ target_compile_options(live_landing_zone_node PRIVATE
   ${PCL_DEFINITIONS} -Wall -Wextra -Wpedantic)
 
 install(TARGETS live_landing_zone_node DESTINATION lib/${PROJECT_NAME})
-install(DIRECTORY config launch DESTINATION share/${PROJECT_NAME})
+install(DIRECTORY config launch rviz DESTINATION share/${PROJECT_NAME})
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)

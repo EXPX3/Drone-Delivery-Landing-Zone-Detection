@@ -3,11 +3,12 @@ from pathlib import Path
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, EmitEvent, IncludeLaunchDescription, RegisterEventHandler
+from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessStart
 from launch.events import matches_action
 from launch.launch_description_sources import FrontendLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import LifecycleNode
+from launch_ros.actions import LifecycleNode, Node
 from launch_ros.event_handlers import OnStateTransition
 from launch_ros.events.lifecycle import ChangeState
 from lifecycle_msgs.msg import Transition
@@ -23,6 +24,8 @@ def generate_launch_description() -> LaunchDescription:
     image_topic = LaunchConfiguration("image_topic")
     camera_info_topic = LaunchConfiguration("camera_info_topic")
     target_frame = LaunchConfiguration("target_frame")
+    config_file = LaunchConfiguration("config_file")
+    use_rviz = LaunchConfiguration("use_rviz")
 
     ouster = IncludeLaunchDescription(
         FrontendLaunchDescriptionSource(str(ouster_share / "launch" / "sensor.launch.xml")),
@@ -45,7 +48,7 @@ def generate_launch_description() -> LaunchDescription:
         namespace="landing_zone",
         output="screen",
         parameters=[
-            str(package_share / "config" / "live_fusion.yaml"),
+            config_file,
             {
                 "point_cloud_topic": "/ouster/points",
                 "image_topic": image_topic,
@@ -54,6 +57,18 @@ def generate_launch_description() -> LaunchDescription:
                 "input_is_motion_compensated": False,
             },
         ],
+    )
+
+    rviz = Node(
+        package="rviz2",
+        executable="rviz2",
+        name="landing_zone_rviz",
+        output="screen",
+        arguments=[
+            "-d", str(package_share / "rviz" / "live_landing_zones.rviz"),
+            "-f", target_frame,
+        ],
+        condition=IfCondition(use_rviz),
     )
 
     configure_detector = RegisterEventHandler(
@@ -111,8 +126,15 @@ def generate_launch_description() -> LaunchDescription:
                 "target_frame",
                 description="Required gravity-aligned local frame with timestamped LiDAR and gimbal/camera TF.",
             ),
+            DeclareLaunchArgument(
+                "config_file",
+                default_value=str(package_share / "config" / "live_fusion.yaml"),
+                description="Complete algorithm, timing, fusion, and tracking parameter YAML.",
+            ),
+            DeclareLaunchArgument("use_rviz", default_value="true"),
             ouster,
             detector,
+            rviz,
             configure_detector,
             activate_detector,
         ]

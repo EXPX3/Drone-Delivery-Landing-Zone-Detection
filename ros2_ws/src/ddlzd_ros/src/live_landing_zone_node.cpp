@@ -145,6 +145,12 @@ LiveLandingZoneNode::~LiveLandingZoneNode()
 ddlzd::DetectorConfig LiveLandingZoneNode::loadDetectorConfig()
 {
   ddlzd::DetectorConfig config;
+  algorithm_ = declare_parameter<std::string>(
+    "detector.algorithm", "region_growing_exact_radius");
+  if (algorithm_ != "region_growing_exact_radius") {
+    throw std::invalid_argument(
+            "detector.algorithm must be region_growing_exact_radius in this branch");
+  }
   config.safety_margin_m = declare_parameter<double>("detector.safety_margin_m", config.safety_margin_m);
   config.obstacle_search_radius_m = declare_parameter<double>(
     "detector.obstacle_search_radius_m", config.obstacle_search_radius_m);

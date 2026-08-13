@@ -3,10 +3,11 @@ from pathlib import Path
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, EmitEvent, RegisterEventHandler
+from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessStart
 from launch.events import matches_action
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import LifecycleNode
+from launch_ros.actions import LifecycleNode, Node
 from launch_ros.event_handlers import OnStateTransition
 from launch_ros.events.lifecycle import ChangeState
 from launch_ros.parameter_descriptions import ParameterValue
@@ -22,7 +23,7 @@ def generate_launch_description() -> LaunchDescription:
         namespace="landing_zone",
         output="screen",
         parameters=[
-            str(package_share / "config" / "live_fusion.yaml"),
+            LaunchConfiguration("config_file"),
             {
                 "point_cloud_topic": LaunchConfiguration("point_cloud_topic"),
                 "image_topic": LaunchConfiguration("image_topic"),
@@ -33,6 +34,17 @@ def generate_launch_description() -> LaunchDescription:
                 ),
             },
         ],
+    )
+    rviz = Node(
+        package="rviz2",
+        executable="rviz2",
+        name="landing_zone_rviz",
+        output="screen",
+        arguments=[
+            "-d", str(package_share / "rviz" / "live_landing_zones.rviz"),
+            "-f", LaunchConfiguration("target_frame"),
+        ],
+        condition=IfCondition(LaunchConfiguration("use_rviz")),
     )
     configure = RegisterEventHandler(
         OnProcessStart(
@@ -63,5 +75,11 @@ def generate_launch_description() -> LaunchDescription:
             "input_is_motion_compensated",
             description="Required: true only when the upstream point cloud is already deskewed; false requires Ouster t.",
         ),
+        DeclareLaunchArgument(
+            "config_file",
+            default_value=str(package_share / "config" / "live_fusion.yaml"),
+            description="Complete algorithm, timing, fusion, and tracking parameter YAML.",
+        ),
+        DeclareLaunchArgument("use_rviz", default_value="true"),
     ]
-    return LaunchDescription(required + [detector, configure, activate])
+    return LaunchDescription(required + [detector, rviz, configure, activate])

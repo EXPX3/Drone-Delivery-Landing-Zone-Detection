@@ -101,6 +101,7 @@ private:
   std::string image_topic_;
   std::string camera_info_topic_;
   std::string target_frame_;
+  std::string algorithm_;
   double rolling_window_sec_{3.0};
   double detection_period_sec_{0.5};
   double local_map_radius_m_{30.0};

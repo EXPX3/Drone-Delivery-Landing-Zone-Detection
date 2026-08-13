@@ -1,0 +1,39 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/PointCloud2
+      Enabled: true
+      Name: Live registered point cloud
+      Topic:
+        Value: /landing_zone/live_landing_zone/local_cloud
+      Queue Size: 2
+      Size (Pixels): 2
+      Style: Points
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: Landing-zone categories
+      Topic:
+        Value: /landing_zone/live_landing_zone/markers
+      Queue Size: 10
+  Enabled: true
+  Global Options:
+    Background Color: 35; 35; 35
+    Fixed Frame: map
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 25
+      Pitch: 0.75
+      Yaw: 0.75
+Window Geometry:
+  Height: 900
+  Width: 1440

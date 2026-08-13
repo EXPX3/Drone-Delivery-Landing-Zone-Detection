@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-pcl-conversions \
     ros-humble-pcl-ros \
     ros-humble-rmw-cyclonedds-cpp \
+    ros-humble-rviz2 \
     ros-humble-tf2-eigen \
     ros-humble-tf2-sensor-msgs \
     ros-humble-visualization-msgs

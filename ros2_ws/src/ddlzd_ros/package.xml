@@ -28,6 +28,7 @@
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>lifecycle_msgs</exec_depend>
   <exec_depend>ouster_ros</exec_depend>
+  <exec_depend>rviz2</exec_depend>
   <test_depend>ament_cmake_gtest</test_depend>
 
   <export>
