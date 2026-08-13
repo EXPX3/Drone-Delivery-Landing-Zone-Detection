@@ -1,7 +1,39 @@
 
-enable_visualization: true
-#enable_visualization: false
+enable_visualization: false
+run_detection_once: true
 terrain_size: 20.0 # side of a square in meters using which a square shaped terrain of area terrain_size*terrain_size is generated
+
+# Select experiment behavior here. The TAG comments below are documentation only.
+active_tags:
+  - USE_ALL_CLASSES_RADIUS_RANGE_EXPERIMENT
+
+# TAG: USE_GROUND_CLASS2_FOR_DETECTION_AND_FULL_CLOUD_FOR_OBSTACLE_CHECK
+# This tag is used by scripts/check_lz_full_cloud_obstacle_check.py to enable
+# the workflow where ground-class points generate landing zone candidates,
+# while the full cropped point cloud is used for vertical obstacle filtering.
+#
+# TAG: USE_RADIUS_2_5_ONLY_EXPERIMENT
+# This legacy alias enables the exact 2.5 m radius experiment.
+#
+# TAG: USE_EXACT_RADIUS_2_5_ONLY_EXPERIMENT
+# This tag keeps candidate centers that have at least 2.5 m clearance, then
+# forces the exported/evaluated landing-zone radius to exactly 2.5 m.
+#
+# TAG: USE_ALL_CLASSES_EXACT_RADIUS_2_5_ONLY_EXPERIMENT
+# This tag runs detection directly on the all-classes cropped PCD and applies
+# the same strict exact 2.5 m evaluated/exported radius.
+#
+# TAG: USE_ALL_CLASSES_RADIUS_RANGE_EXPERIMENT
+# This tag runs detection directly on the all-classes cropped PCD and accepts
+# landing-zone radii from min_radius_threshold through max_radius_threshold.
+#
+# TAG: DOCKER_TOTAL_ALL_CLASSES_MAX200_RADIUS2_5
+# This config variant runs the detector on the total point cloud (all classes)
+# with max_landingZones set to 200 and minimum radius threshold at 2.5 m.
+#
+# ground_only_detection_pcd: "/home/airsim_user/Drone-Delivery-Landing-Zone-Detection/pcds/696_5328_cropped_ground_only.pcd"
+# full_cloud_pcd: "/home/airsim_user/Drone-Delivery-Landing-Zone-Detection/pcds/696_5328_cropped_by_bayernatlas_20260812084517.pcd"
+# candidate_csv: "/home/airsim_user/Drone-Delivery-Landing-Zone-Detection/pcds/region_growing_landing_zones_max2000.csv"
 
 #-----------------------------------------------------------------------------------------------------------------------------
 # NOTE: Do not edit this section unless you know what you are doing.
@@ -10,42 +42,63 @@ use_pcd_file: true  # Set to true to load pointcloud .pcd from pcd_file_path, fa
 #-----------------------------------------------------------------------------------------------------------------------------
 
 # Point cloud source selection - NOTE: add your own .pcd file path. 
-pcd_file_path: "/path/to/your.pcd"
+# pcd_file_path: "/home/airsim_user/Drone-Delivery-Landing-Zone-Detection/pcds/map_1_6m_flat_100kps_0.pcd"
+pcd_file_path: "/home/airsim_user/Drone-Delivery-Landing-Zone-Detection/pcds/696_5328_cropped_by_bayernatlas_20260812084517.pcd"
+landing_zones_csv_path: "/home/airsim_user/Drone-Delivery-Landing-Zone-Detection/pcds/region_growing_landing_zones_max10000_radius2_5_to3.csv"
+# # hazardmetrics thresholds
+# min_radius_threshold: 2.5
+# max_slope_threshold: 25 # in degrees
+# min_point_density_threshold: 30.0 # points/m²
+# max_relief_threshold: 2.0
+# max_roughness_threshold: 0.225
 
 # hazardmetrics thresholds
 min_radius_threshold: 2.5
-max_slope_threshold: 25 # in degrees
-min_point_density_threshold: 30.0 # points/m²
-max_relief_threshold: 2.0
-max_roughness_threshold: 0.1
+max_radius_threshold: 3.0
+# Radius range mode is enabled by active_tags: USE_ALL_CLASSES_RADIUS_RANGE_EXPERIMENT.
+max_slope_threshold: 12 # in degrees
+min_point_density_threshold: 8.0 # points/m²
+max_relief_threshold: 5.0
+max_roughness_threshold: 2.0
+step_size: 0.75
 
 #lzd common parameters if at all used by any
-max_landingZones: 10
-max_Attempts: 10000
+max_landingZones: 10000
+max_Attempts: 1000000
 
 # Algorithms configuration
 # NOTE: comment out the algorithms you do not want to run.
+
 algorithms:
   - name: Region_Growing_Segmentation
-    curvature_threshold: 0.05
-    min_cluster_size: 50
-    alpha: 0.1
-    cluster_tolerance: 0.25
-  - name: seq_overlap
-    cell_size: 1.0
-    alpha: 0.1
-    cluster_tolerance: 1.0
-  - name: kdtree_InflatingCircles
-    k: 30
-    radiusIncrement: 0.1
-  - name: sequentialApproachKdtree
-    cell_size: 1
-    alpha: 0.1
-    cluster_tolerance: 1.0
-  - name: sequentialApproach
-    cell_size: 1
-    alpha: 0.1
-    cluster_tolerance: 1.0
+    curvature_threshold: 0.08
+    min_cluster_size: 120
+    alpha: 0.8
+    cluster_tolerance: 0.85
+
+
+
+# algorithms:
+#   - name: Region_Growing_Segmentation
+#     curvature_threshold: 0.05
+#     min_cluster_size: 50
+#     alpha: 0.1
+#     cluster_tolerance: 0.25
+  # - name: seq_overlap
+  #   cell_size: 1.0
+  #   alpha: 0.1
+  #   cluster_tolerance: 1.0
+  # - name: kdtree_InflatingCircles
+  #   k: 30
+  #   radiusIncrement: 0.1
+  # - name: sequentialApproachKdtree
+  #   cell_size: 1
+  #   alpha: 0.1
+  #   cluster_tolerance: 1.0
+  # - name: sequentialApproach
+  #   cell_size: 1
+  #   alpha: 0.1
+  #   cluster_tolerance: 1.0
   # - name: dummy
   #   cell_size: dummy
   #   alpha: dummy

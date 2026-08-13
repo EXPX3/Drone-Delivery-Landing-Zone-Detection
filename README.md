@@ -62,7 +62,8 @@ Run the Docker container and mount the repository:
 sudo docker run --name DDLZD --rm -it --privileged \
 -e DISPLAY=$DISPLAY -e XAUTHORITY=$XAUTHORITY \
 -v /tmp/.X11-unix:/tmp/.X11-unix \
--v /PATH_TO_YOUR_CLONED_REPO_DIR/Drone-Delivery-Landing-Zone-Detection:/home/airsim_user/Drone-Delivery-Landing-Zone-Detection \
+-v /home/giri/Documents/robotspace/DDLZD_ws/Drone-Delivery-Landing-Zone-Detection:/home/airsim_user/Drone-Delivery-Landing-Zone-Detection \
+-v /home/giri/Documents/robotspace/ws_2025_3dmapoctoserver/bt_pcds:/home/airsim_user/Drone-Delivery-Landing-Zone-Detection/bt_pcds \
 --gpus all --network host --entrypoint /bin/bash giri6937/lam:latest
 ```
 

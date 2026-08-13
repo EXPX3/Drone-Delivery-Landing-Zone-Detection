@@ -228,7 +228,7 @@ void visualizeRankedCandidates(
     viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 3, "colored_cloud"); // Point size 3 for clarity
 
     // Step 7: Visualize circles and rank numbers
-    const double z_offset = -1.0; // Offset circles 1m along normal
+    const double z_offset = 1.0; // Offset circles 1m along normal
     Eigen::Vector3d viewer_dir(0, 0, 1);
     for (size_t i = 0; i < ranked_result.centers.size(); ++i) {
         const auto& center = ranked_result.centers[i];
@@ -504,6 +504,8 @@ CircleFitResult checkVerticalCollisionAndHazardMetrics(
     const double min_point_density = 0.0,
     const double max_relief = 0.0,
     const double max_roughness = 0.0,
+    const double min_radius = 0.0,
+    const double max_radius = std::numeric_limits<double>::infinity(),
     bool enable_xz_proj_visualization = false)
 {
     // Output struct to store collision-free candidates with metrics
@@ -924,9 +926,11 @@ std::vector<Eigen::Vector3d> computeAlphaShapeBoundary3D(
 
 CircleFitResult circleFitting(const PointCloudPcl& inlier_cloud, const double min_radius, 
     double alpha = 0.1, int max_num_of_lzs = 10, double max_slope_threshold = 0, double cluster_tolerance = 0.25, 
-    bool enable_visualization = true) {
+    double max_radius = std::numeric_limits<double>::infinity(),
+    bool enable_visualization = true,
+    bool force_exact_min_radius = false) {
     CircleFitResult result;
-    int max_num_of_lz_per_cluster = 5;
+    int max_num_of_lz_per_cluster = std::max(1, max_num_of_lzs);
     const double min_area = M_PI * min_radius * min_radius;
     int total_lzs_found = 0;
 
@@ -1115,6 +1119,11 @@ CircleFitResult circleFitting(const PointCloudPcl& inlier_cloud, const double mi
                     }
                 }
                 if (radius < min_radius) continue;
+                if (force_exact_min_radius) {
+                    radius = min_radius;
+                } else if (radius > max_radius) {
+                    radius = max_radius;
+                }
 
                 // Validate circle containment
                 bool is_valid_circle = true;

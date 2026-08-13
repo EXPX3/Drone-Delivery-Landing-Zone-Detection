@@ -15,6 +15,7 @@
 #include <yaml-cpp/yaml.h>
 #include <functional>
 #include <algorithm>
+#include <iomanip>
 #include <sys/resource.h>
 #include "architecture.h"
 
@@ -28,6 +29,40 @@ struct ResourceMetrics {
     double system_time;
     long max_rss;
 };
+
+void saveLandingZonesCSV(const CircleFitResult& result, const std::string& filename) {
+    std::ofstream out(filename);
+    if (!out.is_open()) {
+        std::cerr << "Error: Could not open landing-zone CSV for writing: " << filename << std::endl;
+        return;
+    }
+
+    out << "rank,x,y,z,radius,normal_x,normal_y,normal_z\n";
+    out << std::fixed << std::setprecision(6);
+    std::vector<size_t> kept_indices;
+    for (size_t i = 0; i < result.centers.size(); ++i) {
+        bool duplicate = false;
+        for (size_t kept_idx : kept_indices) {
+            const double xy_distance = (result.centers[i].head<2>() - result.centers[kept_idx].head<2>()).norm();
+            const double merge_distance = std::max(1.0, 0.75 * std::min(result.radii[i], result.radii[kept_idx]));
+            if (xy_distance < merge_distance) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (duplicate) {
+            continue;
+        }
+        kept_indices.push_back(i);
+        const auto& center = result.centers[i];
+        const auto& normal = result.normals[i];
+        out << kept_indices.size() << ","
+            << center.x() << "," << center.y() << "," << center.z() << ","
+            << result.radii[i] << ","
+            << normal.x() << "," << normal.y() << "," << normal.z() << "\n";
+    }
+    std::cout << "Saved " << kept_indices.size() << " unique landing zones to " << filename << std::endl;
+}
 
 // Struct to hold parameters for a landing zone
 struct LandingZoneParams {
@@ -377,6 +412,30 @@ public:
         : generator(gen), param_manager(pm), lzd_algorithm(lzd), enable_visualization(enable_viz),
           use_pcd_file(use_pcd), pcd_file_path(pcd_path) {}
 
+    bool runDetectionOnce() {
+        PointCloudPcl cloud = nullptr;
+        if (use_pcd_file) {
+            cloud = loadPointCloudFromPCD(pcd_file_path);
+        } else {
+            LandingZoneParams params;
+            cloud = generator.generatePointCloud(params);
+        }
+
+        if (!cloud) {
+            std::cerr << "Error: Null point cloud. Cannot run detection." << std::endl;
+            return false;
+        }
+
+        bool success = false;
+        ResourceMetrics metrics = measureResources([&]() {
+            success = lzd_algorithm(cloud);
+        });
+        std::cout << "Detection once: Success=" << success
+                  << ", Time=" << (metrics.user_time + metrics.system_time) << " s"
+                  << ", Memory=" << (metrics.max_rss / 1024.0) << " MB" << std::endl;
+        return success;
+    }
+
     void runSimulations(const std::string& param, std::vector<double>& success_rates,
                         std::vector<double>& avg_times, std::vector<double>& avg_memories,
                         int num_simulations, int terrain_size) {
@@ -523,8 +582,8 @@ public:
 
 // Main function
 int main() {
-    std::string config_path = "/home/airsim_user/Drone-Delivery-Landing-Zone-Detection/lib/config/monte_carlo_benchmarking_config.yaml";
-    //std::string config_path = "/home/airsim_user/Drone-Delivery-Landing-Zone-Detection/lib/config/algo_testing_config_local.yaml";
+    //std::string config_path = "/home/airsim_user/Drone-Delivery-Landing-Zone-Detection/lib/config/monte_carlo_benchmarking_config.yaml";
+    std::string config_path = "/home/airsim_user/Drone-Delivery-Landing-Zone-Detection/lib/config/algo_testing_own_pcd_config.yaml";
 
     YAML::Node config;
     try {
@@ -554,6 +613,7 @@ int main() {
     int num_of_discrete_values_per_hazard_metric = 7;
     int total_num_simulations = num_simulations * num_hazard_metrics * num_algorithms * num_of_discrete_values_per_hazard_metric;
     bool enable_visualization = config["enable_visualization"].as<bool>(false);
+    bool run_detection_once = config["run_detection_once"].as<bool>(false);
 
     double min_radius_threshold = config["min_radius_threshold"].as<double>(2.5);
     double max_slope_threshold = config["max_slope_threshold"].as<double>(25.0);
@@ -564,6 +624,10 @@ int main() {
     int max_landingZones = config["max_landingZones"].as<int>(5);
     int max_Attempts = config["max_Attempts"].as<int>(1000);
     double step_size = config["step_size"].as<double>(1.0);
+    std::string landing_zones_csv_path = config["landing_zones_csv_path"].as<std::string>(
+        "/home/airsim_user/Drone-Delivery-Landing-Zone-Detection/pcds/region_growing_landing_zones.csv");
+    double max_radius_threshold = config["max_radius_threshold"].as<double>(std::numeric_limits<double>::infinity());
+    bool force_exact_min_radius = false;
 
     double terrain_size = config["terrain_size"].as<double>(20.0);
     int terrain_size_int = static_cast<int>(terrain_size);
@@ -580,6 +644,42 @@ int main() {
             std::cerr << "Error: Could not create base directory " << base_dir << std::endl;
             return 1;
         }
+    }
+
+    std::vector<std::string> active_tags;
+    if (config["active_tags"] && config["active_tags"].IsSequence()) {
+        for (const auto& tag : config["active_tags"]) {
+            active_tags.push_back(tag.as<std::string>());
+        }
+    }
+    auto has_active_tag = [&](const std::string& tag_name) {
+        return std::find(active_tags.begin(), active_tags.end(), tag_name) != active_tags.end();
+    };
+
+    const bool all_classes_exact_radius_tag = has_active_tag("USE_ALL_CLASSES_EXACT_RADIUS_2_5_ONLY_EXPERIMENT");
+    const bool all_classes_radius_range_tag = has_active_tag("USE_ALL_CLASSES_RADIUS_RANGE_EXPERIMENT");
+    const bool exact_radius_tag = all_classes_exact_radius_tag ||
+                                  has_active_tag("USE_EXACT_RADIUS_2_5_ONLY_EXPERIMENT") ||
+                                  has_active_tag("USE_RADIUS_2_5_ONLY_EXPERIMENT");
+    if (exact_radius_tag) {
+        force_exact_min_radius = true;
+        std::cout << "Activation tag detected. Candidate LZ radius will be forced to exactly "
+                  << min_radius_threshold << " m after clearance >= " << min_radius_threshold
+                  << " m is verified." << std::endl;
+    }
+    if (all_classes_exact_radius_tag || all_classes_radius_range_tag) {
+        if (pcd_file_path.find("ground_only") != std::string::npos ||
+            pcd_file_path.find("class2") != std::string::npos) {
+            std::cerr << "Error: all-classes detection tag is active, but pcd_file_path looks like "
+                      << "a ground-only/class-2 cloud: " << pcd_file_path << std::endl;
+            return 1;
+        }
+        std::cout << "All-classes detection tag detected. Detection input PCD: "
+                  << pcd_file_path << std::endl;
+    }
+    if (!force_exact_min_radius && std::isfinite(max_radius_threshold)) {
+        std::cout << "Radius range active: " << min_radius_threshold << " m <= radius <= "
+                  << max_radius_threshold << " m." << std::endl;
     }
     if (!std::filesystem::create_directories(output_dir)) {
         std::cerr << "Error: Could not create timestamped directory " << output_dir << std::endl;
@@ -602,9 +702,10 @@ int main() {
             algorithms.emplace_back(algo_name, [=](const PointCloudPcl& cloud) {
                 auto flat_regions = segmentPointCloud(cloud, curvature_threshold, max_slope_threshold, min_cluster_size);
                 CircleFitResult circle_result = circleFitting(flat_regions.inlier_cloud, min_radius_threshold, alpha, max_landingZones,
-                    max_slope_threshold, cluster_tolerance, enable_visualization);
+                    max_slope_threshold, cluster_tolerance, max_radius_threshold, enable_visualization, force_exact_min_radius);
                 CircleFitResult ranked_result = checkVerticalCollisionAndHazardMetrics(cloud, circle_result, step_size, min_point_density_threshold,
-                                                        max_relief_threshold, max_roughness_threshold, enable_visualization);
+                                                        max_relief_threshold, max_roughness_threshold, min_radius_threshold, max_radius_threshold, enable_visualization);
+                saveLandingZonesCSV(ranked_result, landing_zones_csv_path);
                 if (enable_visualization) {
                     visualizeRankedCandidates(cloud, ranked_result, flat_regions.cluster_indices);
                 }
@@ -617,9 +718,9 @@ int main() {
             algorithms.emplace_back(algo_name, [=](const PointCloudPcl& cloud) {
                 auto seqoverlapResult = sequentialOverlappingApproach(cloud, cell_size, max_slope_threshold);
                 CircleFitResult circle_result = circleFitting(seqoverlapResult.inlier_cloud, min_radius_threshold, alpha,
-                                                             max_landingZones, max_slope_threshold, cluster_tolerance, enable_visualization);
+                                                             max_landingZones, max_slope_threshold, cluster_tolerance, max_radius_threshold, enable_visualization, force_exact_min_radius);
                 CircleFitResult ranked_result = checkVerticalCollisionAndHazardMetrics(cloud, circle_result, step_size, min_point_density_threshold,
-                    max_relief_threshold, max_roughness_threshold, enable_visualization);
+                    max_relief_threshold, max_roughness_threshold, min_radius_threshold, max_radius_threshold, enable_visualization);
                 if (enable_visualization) {
                     visualizePointCloud(cloud, seqoverlapResult);
                     visualizeRankedCandidates(cloud, ranked_result, seqoverlapResult.cluster_indices);
@@ -633,9 +734,9 @@ int main() {
             algorithms.emplace_back(algo_name, [=](const PointCloudPcl& cloud) {
                 auto seqoverlapResult = sequentialApproach(cloud, cell_size, max_slope_threshold);
                 CircleFitResult circle_result = circleFitting(seqoverlapResult.inlier_cloud, min_radius_threshold, alpha,
-                                                             max_landingZones, max_slope_threshold, cluster_tolerance, enable_visualization);
+                                                             max_landingZones, max_slope_threshold, cluster_tolerance, max_radius_threshold, enable_visualization, force_exact_min_radius);
                 CircleFitResult ranked_result = checkVerticalCollisionAndHazardMetrics(cloud, circle_result, step_size, min_point_density_threshold,
-                    max_relief_threshold, max_roughness_threshold, enable_visualization);
+                    max_relief_threshold, max_roughness_threshold, min_radius_threshold, max_radius_threshold, enable_visualization);
                 if (enable_visualization) {
                     visualizePointCloud(cloud, seqoverlapResult);
                     visualizeRankedCandidates(cloud, ranked_result, seqoverlapResult.cluster_indices);
@@ -649,9 +750,9 @@ int main() {
             algorithms.emplace_back(algo_name, [=](const PointCloudPcl& cloud) {
                 auto sequentialApproachKdtree_result = sequentialApproachKdtree(cloud, cell_size, max_slope_threshold);
                 CircleFitResult circle_result = circleFitting(sequentialApproachKdtree_result.inlier_cloud, min_radius_threshold, alpha,
-                                                             max_landingZones, max_slope_threshold, cluster_tolerance, enable_visualization);
+                                                             max_landingZones, max_slope_threshold, cluster_tolerance, max_radius_threshold, enable_visualization, force_exact_min_radius);
                 CircleFitResult ranked_result = checkVerticalCollisionAndHazardMetrics(cloud, circle_result, step_size, min_point_density_threshold,
-                    max_relief_threshold, max_roughness_threshold, enable_visualization);
+                    max_relief_threshold, max_roughness_threshold, min_radius_threshold, max_radius_threshold, enable_visualization);
                 if (enable_visualization) {
                     visualizePointCloud(cloud, sequentialApproachKdtree_result);
                     visualizeRankedCandidates(cloud, ranked_result, sequentialApproachKdtree_result.cluster_indices);
@@ -666,7 +767,7 @@ int main() {
                                                                       max_landingZones, max_Attempts,
                                                                       radiusIncrement);
                 CircleFitResult ranked_result = checkVerticalCollisionAndHazardMetrics(cloud, candidatePoints, step_size, min_point_density_threshold,
-                    max_relief_threshold, max_roughness_threshold, enable_visualization);
+                    max_relief_threshold, max_roughness_threshold, min_radius_threshold, max_radius_threshold, enable_visualization);
                 if (enable_visualization) {
                     std::vector<pcl::PointIndices> cluster_indices;
                     visualizeRankedCandidates(cloud, ranked_result, cluster_indices);
@@ -680,6 +781,11 @@ int main() {
     ResultProcessor processor;
     for (const auto& [algo_name, lzd_algo] : algorithms) {
         SimulationRunner runner(generator, param_manager, lzd_algo, enable_visualization, use_pcd_file, pcd_file_path);
+        if (run_detection_once) {
+            bool success = runner.runDetectionOnce();
+            std::cout << "Single detection run complete for " << algo_name << ". Success=" << success << std::endl;
+            continue;
+        }
         for (const auto& param : parameters) {
             std::vector<double> success_rates, avg_times, avg_memories;
             runner.runSimulations(param, success_rates, avg_times, avg_memories, num_simulations, terrain_size_int);

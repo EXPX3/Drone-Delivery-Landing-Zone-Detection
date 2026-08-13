@@ -1,5 +1,7 @@
-# Ignore the build folder and its contents
-build
+# Ignore build folders and their contents
+build/
+**/build/
+**/build_*/
 
 # Compiled object files
 *.o
@@ -27,6 +29,8 @@ build
 # Temporary files
 *.swp
 *~
+__pycache__/
+*.py[cod]
 
 # Log files
 *.log
@@ -41,4 +45,15 @@ build
 # *.jpeg
 
 *.pcd
+*.laz
+*.las
 results
+README copy.md
+
+# Generated point-cloud outputs and local captures
+pcds/
+DepthCamera_*.json
+DepthCapture_*.png
+RenderOption_*.json
+ScreenCamera_*.json
+ScreenCapture_*.png
