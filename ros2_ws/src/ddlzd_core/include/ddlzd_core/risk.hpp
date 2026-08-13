@@ -9,7 +9,6 @@ struct RiskConfig
 {
   double safest_threshold{0.33};
   double safe_threshold{0.62};
-  double minimum_camera_coverage{0.55};
   double minimum_clearance_coverage{0.55};
 
   double slope_good_deg{0.0};

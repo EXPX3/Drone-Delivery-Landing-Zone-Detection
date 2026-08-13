@@ -10,7 +10,6 @@ float32 radius
 float32 risk_score
 uint8 category
 bool geometry_valid
-bool camera_valid
 bool temporally_stable
 uint32 consecutive_observations
 
@@ -22,9 +21,4 @@ uint32 obstacle_count
 float32 nearest_obstacle_clearance_m
 float32 observed_fraction
 float32 clearance_observed_fraction
-float32 camera_coverage_fraction
-float32 tree_fraction
-float32 tree_score
-float32 grass_fraction
-float32 texture_risk
 string rejection_reason

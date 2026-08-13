@@ -5,10 +5,8 @@ SHELL ["/bin/bash", "-lc"]
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libeigen3-dev \
-    libopencv-dev \
     libpcl-dev \
     python3-colcon-common-extensions \
-    ros-humble-cv-bridge \
     ros-humble-diagnostic-msgs \
     ros-humble-ouster-ros \
     ros-humble-pcl-conversions \

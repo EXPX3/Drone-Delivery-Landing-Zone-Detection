@@ -29,16 +29,6 @@ struct GeometryMetrics
   double clearance_observed_fraction{0.0};
 };
 
-struct CameraEvidence
-{
-  bool valid{false};
-  double coverage_fraction{0.0};
-  double tree_fraction{0.0};
-  double tree_score{0.0};
-  double grass_fraction{0.0};
-  double texture_risk{0.0};
-};
-
 struct Candidate
 {
   std::uint64_t id{0};
@@ -48,7 +38,6 @@ struct Candidate
   bool geometry_valid{false};
   std::string rejection_reason;
   GeometryMetrics geometry;
-  CameraEvidence camera;
   double risk_score{1.0};
   Category category{Category::kUnknown};
   bool temporally_stable{false};

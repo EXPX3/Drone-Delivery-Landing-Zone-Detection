@@ -26,8 +26,6 @@ def generate_launch_description() -> LaunchDescription:
             LaunchConfiguration("config_file"),
             {
                 "point_cloud_topic": LaunchConfiguration("point_cloud_topic"),
-                "image_topic": LaunchConfiguration("image_topic"),
-                "camera_info_topic": LaunchConfiguration("camera_info_topic"),
                 "target_frame": LaunchConfiguration("target_frame"),
                 "input_is_motion_compensated": ParameterValue(
                     LaunchConfiguration("input_is_motion_compensated"), value_type=bool
@@ -68,8 +66,6 @@ def generate_launch_description() -> LaunchDescription:
     )
     required = [
         DeclareLaunchArgument("point_cloud_topic", description="Required PointCloud2 input topic."),
-        DeclareLaunchArgument("image_topic", description="Required rectified camera Image topic."),
-        DeclareLaunchArgument("camera_info_topic", description="Required calibrated CameraInfo topic."),
         DeclareLaunchArgument("target_frame", description="Required gravity-aligned local frame."),
         DeclareLaunchArgument(
             "input_is_motion_compensated",
@@ -78,7 +74,7 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument(
             "config_file",
             default_value=str(package_share / "config" / "live_fusion.yaml"),
-            description="Complete algorithm, timing, fusion, and tracking parameter YAML.",
+            description="Complete geometry algorithm, timing, risk, and tracking parameter YAML.",
         ),
         DeclareLaunchArgument("use_rviz", default_value="true"),
     ]
