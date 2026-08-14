@@ -91,6 +91,14 @@ std_msgs::msg::ColorRGBA categoryColor(const ddlzd::Category category)
   return color;
 }
 
+std_msgs::msg::ColorRGBA selectedBestColor()
+{
+  std_msgs::msg::ColorRGBA color;
+  color.a = 0.95F;
+  color.b = 1.0F;
+  return color;
+}
+
 std::string categoryName(const ddlzd::Category category)
 {
   switch (category) {
@@ -590,6 +598,7 @@ void LiveLandingZoneNode::processJob(const Job & job)
     risk_classifier_->classify(candidate);
   }
   updateTracks(candidates, job.stamp);
+  updateSelectedBestLandingZone(candidates);
   const double processing_ms = std::chrono::duration<double, std::milli>(
     std::chrono::steady_clock::now() - start).count();
   publishResults(job, candidates, processing_ms);
@@ -681,6 +690,40 @@ void LiveLandingZoneNode::updateTracks(
   }
 }
 
+void LiveLandingZoneNode::updateSelectedBestLandingZone(
+  const std::vector<ddlzd::Candidate> & candidates)
+{
+  const auto is_selectable = [](const ddlzd::Candidate & candidate) {
+      return candidate.category == ddlzd::Category::kSafest && candidate.geometry_valid &&
+             candidate.temporally_stable && candidate.rejection_reason.empty();
+    };
+
+  if (selected_best_track_id_) {
+    const auto selected = std::find_if(
+      candidates.begin(), candidates.end(), [&](const ddlzd::Candidate & candidate) {
+        return candidate.id == *selected_best_track_id_;
+      });
+    if (selected != candidates.end() && is_selectable(*selected)) {
+      return;
+    }
+    selected_best_track_id_.reset();
+  }
+
+  const ddlzd::Candidate * best = nullptr;
+  for (const auto & candidate : candidates) {
+    if (!is_selectable(candidate)) {
+      continue;
+    }
+    if (best == nullptr || candidate.risk_score < best->risk_score) {
+      best = &candidate;
+    }
+  }
+
+  if (best != nullptr) {
+    selected_best_track_id_ = best->id;
+  }
+}
+
 void LiveLandingZoneNode::publishResults(
   const Job & job, const std::vector<ddlzd::Candidate> & candidates,
   const double processing_ms)
@@ -696,6 +739,8 @@ void LiveLandingZoneNode::publishResults(
   markers.markers.push_back(clear);
   int marker_id = 0;
   for (const auto & candidate : candidates) {
+    const bool is_selected_best =
+      selected_best_track_id_ && candidate.id == *selected_best_track_id_;
     ddlzd_msgs::msg::LandingZone zone;
     zone.id = candidate.id;
     zone.pose.position.x = candidate.center.x();
@@ -735,8 +780,8 @@ void LiveLandingZoneNode::publishResults(
     circle.id = marker_id++;
     circle.type = visualization_msgs::msg::Marker::LINE_STRIP;
     circle.action = visualization_msgs::msg::Marker::ADD;
-    circle.scale.x = 0.10;
-    circle.color = categoryColor(candidate.category);
+    circle.scale.x = is_selected_best ? 0.18 : 0.10;
+    circle.color = is_selected_best ? selectedBestColor() : categoryColor(candidate.category);
     circle.lifetime = rclcpp::Duration::from_seconds(2.5 * detection_period_sec_);
     for (int segment = 0; segment <= 72; ++segment) {
       const double angle = 2.0 * kPi * static_cast<double>(segment) / 72.0;
@@ -759,9 +804,10 @@ void LiveLandingZoneNode::publishResults(
     text.pose.position.y = candidate.center.y();
     text.pose.position.z = candidate.center.z() + 0.8;
     text.pose.orientation.w = 1.0;
-    text.scale.z = 0.35;
-    text.color = categoryColor(candidate.category);
-    text.text = std::to_string(candidate.id) + " " + categoryName(candidate.category) +
+    text.scale.z = is_selected_best ? 0.45 : 0.35;
+    text.color = is_selected_best ? selectedBestColor() : categoryColor(candidate.category);
+    text.text = std::to_string(candidate.id) + " " +
+      (is_selected_best ? "best" : categoryName(candidate.category)) +
       " R=" + std::to_string(candidate.risk_score).substr(0, 4);
     text.lifetime = circle.lifetime;
     markers.markers.push_back(text);
