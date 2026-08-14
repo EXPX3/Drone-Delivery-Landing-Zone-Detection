@@ -8,6 +8,7 @@ Visualization Manager:
       Enabled: true
       Name: Live registered point cloud
       Topic:
+        Reliability Policy: Best Effort
         Value: /landing_zone/live_landing_zone/local_cloud
       Queue Size: 2
       Size (Pixels): 2

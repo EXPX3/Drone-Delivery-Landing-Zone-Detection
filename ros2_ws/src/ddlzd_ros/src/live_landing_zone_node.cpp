@@ -787,7 +787,7 @@ void LiveLandingZoneNode::publishDiagnostic(
   array.header.stamp = stamp;
   diagnostic_msgs::msg::DiagnosticStatus status;
   status.level = static_cast<std::uint8_t>(level);
-  status.name = get_fully_qualified_name() + std::string(": lidar");
+  status.name = get_node_base_interface()->get_fully_qualified_name() + std::string(": lidar");
   status.hardware_id = "ouster_lidar_only";
   status.message = message;
   status.values.push_back(keyValue("map_points", std::to_string(points)));
