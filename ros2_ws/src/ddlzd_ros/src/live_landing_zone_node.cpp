@@ -1,6 +1,5 @@
 #include "ddlzd_ros/live_landing_zone_node.hpp"
 
-#include <cv_bridge/cv_bridge.h>
 #include <diagnostic_msgs/msg/diagnostic_status.hpp>
 #include <diagnostic_msgs/msg/key_value.hpp>
 #include <geometry_msgs/msg/point.hpp>
@@ -9,7 +8,6 @@
 #include <tf2_sensor_msgs/tf2_sensor_msgs.hpp>
 
 #include <Eigen/Geometry>
-#include <opencv2/imgproc.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -93,6 +91,14 @@ std_msgs::msg::ColorRGBA categoryColor(const ddlzd::Category category)
   return color;
 }
 
+std_msgs::msg::ColorRGBA selectedBestColor()
+{
+  std_msgs::msg::ColorRGBA color;
+  color.a = 0.95F;
+  color.b = 1.0F;
+  return color;
+}
+
 std::string categoryName(const ddlzd::Category category)
 {
   switch (category) {
@@ -126,6 +132,14 @@ std::size_t positiveSize(const int value, const std::string & parameter)
 {
   if (value <= 0) {
     throw std::invalid_argument(parameter + " must be a positive integer");
+  }
+  return static_cast<std::size_t>(value);
+}
+
+std::size_t nonNegativeSize(const int value, const std::string & parameter)
+{
+  if (value < 0) {
+    throw std::invalid_argument(parameter + " must be a non-negative integer");
   }
   return static_cast<std::size_t>(value);
 }
@@ -176,7 +190,7 @@ ddlzd::DetectorConfig LiveLandingZoneNode::loadDetectorConfig()
   config.normal_neighbors = positiveSize(
     declare_parameter<int>("detector.normal_neighbors", static_cast<int>(config.normal_neighbors)),
     "detector.normal_neighbors");
-  config.obstacle_min_points = positiveSize(
+  config.obstacle_min_points = nonNegativeSize(
     declare_parameter<int>("detector.obstacle_min_points", static_cast<int>(config.obstacle_min_points)),
     "detector.obstacle_min_points");
   config.angular_bins = positiveSize(
@@ -196,8 +210,6 @@ ddlzd::RiskConfig LiveLandingZoneNode::loadRiskConfig()
   ddlzd::RiskConfig config;
   config.safest_threshold = declare_parameter<double>("risk.safest_threshold", config.safest_threshold);
   config.safe_threshold = declare_parameter<double>("risk.safe_threshold", config.safe_threshold);
-  config.minimum_camera_coverage = declare_parameter<double>(
-    "risk.minimum_camera_coverage", config.minimum_camera_coverage);
   config.minimum_clearance_coverage = declare_parameter<double>(
     "risk.minimum_clearance_coverage", config.minimum_clearance_coverage);
   config.slope_good_deg = declare_parameter<double>("risk.slope_good_deg", config.slope_good_deg);
@@ -215,33 +227,6 @@ ddlzd::RiskConfig LiveLandingZoneNode::loadRiskConfig()
     "risk.observed_good_fraction", config.observed_good_fraction);
   safest_threshold_ = config.safest_threshold;
   safe_threshold_ = config.safe_threshold;
-  minimum_camera_coverage_ = config.minimum_camera_coverage;
-  return config;
-}
-
-SemanticConfig LiveLandingZoneNode::loadSemanticConfig()
-{
-  SemanticConfig config;
-  config.exg_low = declare_parameter<double>("semantic.exg_low", config.exg_low);
-  config.exg_high = declare_parameter<double>("semantic.exg_high", config.exg_high);
-  config.vari_low = declare_parameter<double>("semantic.vari_low", config.vari_low);
-  config.vari_high = declare_parameter<double>("semantic.vari_high", config.vari_high);
-  config.saturation_low = declare_parameter<double>("semantic.saturation_low", config.saturation_low);
-  config.saturation_high = declare_parameter<double>("semantic.saturation_high", config.saturation_high);
-  config.texture_low = declare_parameter<double>("semantic.texture_low", config.texture_low);
-  config.texture_high = declare_parameter<double>("semantic.texture_high", config.texture_high);
-  config.tree_threshold = declare_parameter<double>("semantic.tree_threshold", config.tree_threshold);
-  config.grass_threshold = declare_parameter<double>("semantic.grass_threshold", config.grass_threshold);
-  config.occlusion_tolerance_m = declare_parameter<double>(
-    "semantic.occlusion_tolerance_m", config.occlusion_tolerance_m);
-  config.evidence_angular_bins = positiveSize(
-    declare_parameter<int>(
-      "semantic.evidence_angular_bins", static_cast<int>(config.evidence_angular_bins)),
-    "semantic.evidence_angular_bins");
-  config.evidence_radial_bins = positiveSize(
-    declare_parameter<int>(
-      "semantic.evidence_radial_bins", static_cast<int>(config.evidence_radial_bins)),
-    "semantic.evidence_radial_bins");
   return config;
 }
 
@@ -250,20 +235,15 @@ LiveLandingZoneNode::CallbackReturn LiveLandingZoneNode::on_configure(
 {
   try {
     point_cloud_topic_ = declare_parameter<std::string>("point_cloud_topic", "");
-    image_topic_ = declare_parameter<std::string>("image_topic", "");
-    camera_info_topic_ = declare_parameter<std::string>("camera_info_topic", "");
     target_frame_ = declare_parameter<std::string>("target_frame", "");
     input_is_motion_compensated_ = declare_parameter<bool>("input_is_motion_compensated", false);
-    if (point_cloud_topic_.empty() || image_topic_.empty() || camera_info_topic_.empty() ||
-      target_frame_.empty())
+    if (point_cloud_topic_.empty() || target_frame_.empty())
     {
-      throw std::invalid_argument("point_cloud_topic, image_topic, camera_info_topic and target_frame are required");
+      throw std::invalid_argument("point_cloud_topic and target_frame are required");
     }
     rolling_window_sec_ = declare_parameter<double>("rolling_window_sec", rolling_window_sec_);
     detection_period_sec_ = declare_parameter<double>("detection_period_sec", detection_period_sec_);
     local_map_radius_m_ = declare_parameter<double>("local_map_radius_m", local_map_radius_m_);
-    sync_tolerance_sec_ = declare_parameter<double>("sync_tolerance_sec", sync_tolerance_sec_);
-    image_buffer_sec_ = declare_parameter<double>("image_buffer_sec", image_buffer_sec_);
     tf_timeout_sec_ = declare_parameter<double>("tf_timeout_sec", tf_timeout_sec_);
     max_cloud_age_sec_ = declare_parameter<double>("max_cloud_age_sec", max_cloud_age_sec_);
     max_scan_duration_sec_ = declare_parameter<double>(
@@ -283,13 +263,10 @@ LiveLandingZoneNode::CallbackReturn LiveLandingZoneNode::on_configure(
     minimum_stable_observations_ = static_cast<std::uint32_t>(minimum_stable_observations);
     const auto detector_config = loadDetectorConfig();
     const auto risk_config = loadRiskConfig();
-    const auto semantic_config = loadSemanticConfig();
     if (rolling_window_sec_ <= 0.0 || detection_period_sec_ <= 0.0 ||
       local_map_radius_m_ <= detector_config.landing_radius_m + detector_config.safety_margin_m ||
       local_map_radius_m_ <= detector_config.obstacle_search_radius_m ||
       detector_config.obstacle_search_radius_m < risk_config.clearance_good_m ||
-      sync_tolerance_sec_ < 0.0 || image_buffer_sec_ <= 0.0 ||
-      image_buffer_sec_ < sync_tolerance_sec_ ||
       tf_timeout_sec_ <= 0.0 || max_cloud_age_sec_ <= 0.0 ||
       max_scan_duration_sec_ <= 0.0 ||
       track_match_distance_m_ <= 0.0 || track_timeout_sec_ <= 0.0 ||
@@ -301,7 +278,6 @@ LiveLandingZoneNode::CallbackReturn LiveLandingZoneNode::on_configure(
 
     detector_ = std::make_unique<ddlzd::Detector>(detector_config);
     risk_classifier_ = std::make_unique<ddlzd::RiskClassifier>(risk_config);
-    semantic_projector_ = std::make_unique<SemanticProjector>(semantic_config);
     tf_buffer_ = std::make_unique<tf2_ros::Buffer>(get_clock());
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
@@ -309,8 +285,6 @@ LiveLandingZoneNode::CallbackReturn LiveLandingZoneNode::on_configure(
       "~/zones", rclcpp::QoS(1).reliable());
     markers_publisher_ = create_publisher<visualization_msgs::msg::MarkerArray>(
       "~/markers", rclcpp::QoS(1).reliable());
-    debug_image_publisher_ = create_publisher<sensor_msgs::msg::Image>(
-      "~/debug_image", rclcpp::SensorDataQoS().keep_last(1));
     map_publisher_ = create_publisher<sensor_msgs::msg::PointCloud2>(
       "~/local_cloud", rclcpp::SensorDataQoS().keep_last(1));
     diagnostics_publisher_ = create_publisher<diagnostic_msgs::msg::DiagnosticArray>(
@@ -328,7 +302,6 @@ LiveLandingZoneNode::CallbackReturn LiveLandingZoneNode::on_activate(
   rclcpp_lifecycle::LifecycleNode::on_activate(state);
   zones_publisher_->on_activate();
   markers_publisher_->on_activate();
-  debug_image_publisher_->on_activate();
   map_publisher_->on_activate();
   diagnostics_publisher_->on_activate();
 
@@ -336,12 +309,6 @@ LiveLandingZoneNode::CallbackReturn LiveLandingZoneNode::on_activate(
   cloud_subscription_ = create_subscription<sensor_msgs::msg::PointCloud2>(
     point_cloud_topic_, sensor_qos,
     std::bind(&LiveLandingZoneNode::pointCloudCallback, this, std::placeholders::_1));
-  image_subscription_ = create_subscription<sensor_msgs::msg::Image>(
-    image_topic_, sensor_qos,
-    std::bind(&LiveLandingZoneNode::imageCallback, this, std::placeholders::_1));
-  camera_info_subscription_ = create_subscription<sensor_msgs::msg::CameraInfo>(
-    camera_info_topic_, rclcpp::SensorDataQoS().keep_last(1),
-    std::bind(&LiveLandingZoneNode::cameraInfoCallback, this, std::placeholders::_1));
   detection_timer_ = create_wall_timer(
     std::chrono::duration<double>(detection_period_sec_),
     std::bind(&LiveLandingZoneNode::scheduleDetection, this));
@@ -355,14 +322,10 @@ LiveLandingZoneNode::CallbackReturn LiveLandingZoneNode::on_deactivate(
 {
   detection_timer_.reset();
   cloud_subscription_.reset();
-  image_subscription_.reset();
-  camera_info_subscription_.reset();
   stopWorker();
   {
-    std::scoped_lock lock(cloud_mutex_, image_mutex_, tracks_mutex_);
+    std::scoped_lock lock(cloud_mutex_, tracks_mutex_);
     cloud_frames_.clear();
-    images_.clear();
-    camera_info_.reset();
     tracks_.clear();
   }
   visualization_msgs::msg::MarkerArray clear;
@@ -372,7 +335,6 @@ LiveLandingZoneNode::CallbackReturn LiveLandingZoneNode::on_deactivate(
   markers_publisher_->publish(clear);
   zones_publisher_->on_deactivate();
   markers_publisher_->on_deactivate();
-  debug_image_publisher_->on_deactivate();
   map_publisher_->on_deactivate();
   diagnostics_publisher_->on_deactivate();
   rclcpp_lifecycle::LifecycleNode::on_deactivate(state);
@@ -384,12 +346,10 @@ LiveLandingZoneNode::CallbackReturn LiveLandingZoneNode::on_cleanup(
 {
   detector_.reset();
   risk_classifier_.reset();
-  semantic_projector_.reset();
   tf_listener_.reset();
   tf_buffer_.reset();
   zones_publisher_.reset();
   markers_publisher_.reset();
-  debug_image_publisher_.reset();
   map_publisher_.reset();
   diagnostics_publisher_.reset();
   return CallbackReturn::SUCCESS;
@@ -570,36 +530,6 @@ LiveLandingZoneNode::CloudFrame LiveLandingZoneNode::transformAndDeskew(
   return frame;
 }
 
-void LiveLandingZoneNode::imageCallback(sensor_msgs::msg::Image::ConstSharedPtr message)
-{
-  std::lock_guard<std::mutex> lock(image_mutex_);
-  const rclcpp::Time stamp(message->header.stamp);
-  if (!images_.empty() && stamp <= rclcpp::Time(images_.back()->header.stamp)) {
-    RCLCPP_WARN_THROTTLE(
-      get_logger(), *get_clock(), 5000, "Out-of-order or duplicate camera frame rejected");
-    return;
-  }
-  images_.push_back(std::move(message));
-  while (!images_.empty() &&
-    (stamp - rclcpp::Time(images_.front()->header.stamp)).seconds() > image_buffer_sec_)
-  {
-    images_.pop_front();
-  }
-}
-
-void LiveLandingZoneNode::cameraInfoCallback(
-  sensor_msgs::msg::CameraInfo::ConstSharedPtr message)
-{
-  if (message->header.frame_id.empty() || message->width == 0U || message->height == 0U ||
-    message->p[0] <= 0.0 || message->p[5] <= 0.0 || message->p[10] <= 0.0)
-  {
-    RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 5000, "Invalid CameraInfo rejected");
-    return;
-  }
-  std::lock_guard<std::mutex> lock(image_mutex_);
-  camera_info_ = std::move(message);
-}
-
 void LiveLandingZoneNode::scheduleDetection()
 {
   Job job;
@@ -628,21 +558,6 @@ void LiveLandingZoneNode::scheduleDetection()
           job.cloud->push_back(point);
         }
       }
-    }
-  }
-  {
-    std::lock_guard<std::mutex> lock(image_mutex_);
-    job.camera_info = camera_info_;
-    double best_difference = std::numeric_limits<double>::infinity();
-    for (const auto & image : images_) {
-      const double difference = std::abs((rclcpp::Time(image->header.stamp) - job.stamp).seconds());
-      if (difference < best_difference) {
-        best_difference = difference;
-        job.image = image;
-      }
-    }
-    if (best_difference > sync_tolerance_sec_) {
-      job.image.reset();
     }
   }
   {
@@ -687,50 +602,18 @@ void LiveLandingZoneNode::processJob(const Job & job)
       }
     }
   }
-  bool camera_fused = false;
-  cv::Mat debug_image;
-  std::optional<Eigen::Isometry3d> camera_from_target;
-
-  if (job.image && job.camera_info) {
-    try {
-      if (job.image->header.frame_id != job.camera_info->header.frame_id) {
-        throw std::runtime_error("image and CameraInfo frame_id differ");
-      }
-      const auto transform = tf_buffer_->lookupTransform(
-        job.camera_info->header.frame_id, target_frame_, rclcpp::Time(job.image->header.stamp),
-        rclcpp::Duration::from_seconds(tf_timeout_sec_));
-      camera_from_target = tf2::transformToEigen(transform.transform);
-      const cv::Mat bgr = cv_bridge::toCvCopy(job.image, "bgr8")->image;
-      auto projection = semantic_projector_->project(
-        *job.cloud, bgr, *job.camera_info, *camera_from_target);
-      debug_image = projection.semantic_bgr;
-      for (auto & candidate : candidates) {
-        candidate.camera = semantic_projector_->evidenceForCandidate(
-          candidate, *job.cloud, projection);
-      }
-      camera_fused = std::any_of(
-        candidates.begin(), candidates.end(), [&](const ddlzd::Candidate & candidate) {
-          return candidate.camera.valid &&
-                 candidate.camera.coverage_fraction >= minimum_camera_coverage_;
-        });
-    } catch (const std::exception & error) {
-      RCLCPP_WARN(get_logger(), "RGB fusion unavailable for this update: %s", error.what());
-    }
-  }
-
   for (auto & candidate : candidates) {
     risk_classifier_->classify(candidate);
   }
   updateTracks(candidates, job.stamp);
+  updateSelectedBestLandingZone(candidates);
   const double processing_ms = std::chrono::duration<double, std::milli>(
     std::chrono::steady_clock::now() - start).count();
-  publishResults(
-    job, candidates, camera_fused, processing_ms, debug_image, camera_from_target);
+  publishResults(job, candidates, processing_ms);
   publishDiagnostic(
     job.stamp,
-    camera_fused ? diagnostic_msgs::msg::DiagnosticStatus::OK :
-    diagnostic_msgs::msg::DiagnosticStatus::WARN,
-    camera_fused ? "LiDAR and RGB fusion valid" : "LiDAR valid; RGB evidence unavailable",
+    diagnostic_msgs::msg::DiagnosticStatus::OK,
+    "LiDAR geometry classification valid",
     job.cloud->size(), candidates.size(), processing_ms);
 }
 
@@ -815,27 +698,57 @@ void LiveLandingZoneNode::updateTracks(
   }
 }
 
+void LiveLandingZoneNode::updateSelectedBestLandingZone(
+  const std::vector<ddlzd::Candidate> & candidates)
+{
+  const auto is_selectable = [](const ddlzd::Candidate & candidate) {
+      return candidate.category == ddlzd::Category::kSafest && candidate.geometry_valid &&
+             candidate.temporally_stable && candidate.rejection_reason.empty();
+    };
+
+  if (selected_best_track_id_) {
+    const auto selected = std::find_if(
+      candidates.begin(), candidates.end(), [&](const ddlzd::Candidate & candidate) {
+        return candidate.id == *selected_best_track_id_;
+      });
+    if (selected != candidates.end() && is_selectable(*selected)) {
+      return;
+    }
+    selected_best_track_id_.reset();
+  }
+
+  const ddlzd::Candidate * best = nullptr;
+  for (const auto & candidate : candidates) {
+    if (!is_selectable(candidate)) {
+      continue;
+    }
+    if (best == nullptr || candidate.risk_score < best->risk_score) {
+      best = &candidate;
+    }
+  }
+
+  if (best != nullptr) {
+    selected_best_track_id_ = best->id;
+  }
+}
+
 void LiveLandingZoneNode::publishResults(
   const Job & job, const std::vector<ddlzd::Candidate> & candidates,
-  const bool camera_fused, const double processing_ms, const cv::Mat & debug_image,
-  const std::optional<Eigen::Isometry3d> & camera_from_target)
+  const double processing_ms)
 {
   ddlzd_msgs::msg::LandingZoneArray output;
   output.header.stamp = job.stamp;
   output.header.frame_id = target_frame_;
-  if (job.image) {
-    output.camera_stamp = job.image->header.stamp;
-  }
-  output.camera_fused = camera_fused;
   output.processing_time_ms = static_cast<float>(processing_ms);
 
   visualization_msgs::msg::MarkerArray markers;
   visualization_msgs::msg::Marker clear;
   clear.action = visualization_msgs::msg::Marker::DELETEALL;
   markers.markers.push_back(clear);
-  cv::Mat annotated = debug_image.empty() ? cv::Mat() : debug_image.clone();
   int marker_id = 0;
   for (const auto & candidate : candidates) {
+    const bool is_selected_best =
+      selected_best_track_id_ && candidate.id == *selected_best_track_id_;
     ddlzd_msgs::msg::LandingZone zone;
     zone.id = candidate.id;
     zone.pose.position.x = candidate.center.x();
@@ -854,8 +767,6 @@ void LiveLandingZoneNode::publishResults(
     zone.risk_score = static_cast<float>(candidate.risk_score);
     zone.category = static_cast<std::uint8_t>(candidate.category);
     zone.geometry_valid = candidate.geometry_valid;
-    zone.camera_valid = candidate.camera.valid &&
-      candidate.camera.coverage_fraction >= minimum_camera_coverage_;
     zone.temporally_stable = candidate.temporally_stable;
     zone.consecutive_observations = candidate.consecutive_observations;
     zone.slope_deg = static_cast<float>(candidate.geometry.slope_deg);
@@ -868,11 +779,6 @@ void LiveLandingZoneNode::publishResults(
     zone.observed_fraction = static_cast<float>(candidate.geometry.observed_fraction);
     zone.clearance_observed_fraction = static_cast<float>(
       candidate.geometry.clearance_observed_fraction);
-    zone.camera_coverage_fraction = static_cast<float>(candidate.camera.coverage_fraction);
-    zone.tree_fraction = static_cast<float>(candidate.camera.tree_fraction);
-    zone.tree_score = static_cast<float>(candidate.camera.tree_score);
-    zone.grass_fraction = static_cast<float>(candidate.camera.grass_fraction);
-    zone.texture_risk = static_cast<float>(candidate.camera.texture_risk);
     zone.rejection_reason = candidate.rejection_reason;
     output.zones.push_back(zone);
 
@@ -882,8 +788,8 @@ void LiveLandingZoneNode::publishResults(
     circle.id = marker_id++;
     circle.type = visualization_msgs::msg::Marker::LINE_STRIP;
     circle.action = visualization_msgs::msg::Marker::ADD;
-    circle.scale.x = 0.10;
-    circle.color = categoryColor(candidate.category);
+    circle.scale.x = is_selected_best ? 0.18 : 0.10;
+    circle.color = is_selected_best ? selectedBestColor() : categoryColor(candidate.category);
     circle.lifetime = rclcpp::Duration::from_seconds(2.5 * detection_period_sec_);
     for (int segment = 0; segment <= 72; ++segment) {
       const double angle = 2.0 * kPi * static_cast<double>(segment) / 72.0;
@@ -906,37 +812,14 @@ void LiveLandingZoneNode::publishResults(
     text.pose.position.y = candidate.center.y();
     text.pose.position.z = candidate.center.z() + 0.8;
     text.pose.orientation.w = 1.0;
-    text.scale.z = 0.35;
-    text.color = categoryColor(candidate.category);
-    text.text = std::to_string(candidate.id) + " " + categoryName(candidate.category) +
+    text.scale.z = is_selected_best ? 0.45 : 0.35;
+    text.color = is_selected_best ? selectedBestColor() : categoryColor(candidate.category);
+    text.text = std::to_string(candidate.id) + " " +
+      (is_selected_best ? "best" : categoryName(candidate.category)) +
       " R=" + std::to_string(candidate.risk_score).substr(0, 4);
     text.lifetime = circle.lifetime;
     markers.markers.push_back(text);
 
-    if (!annotated.empty() && camera_from_target && job.camera_info) {
-      std::vector<std::optional<cv::Point>> image_circle(72U);
-      for (int segment = 0; segment < 72; ++segment) {
-        const double angle = 2.0 * kPi * static_cast<double>(segment) / 72.0;
-        const Eigen::Vector3d point = pointOnHorizontalFootprint(candidate, angle);
-        cv::Point pixel;
-        if (semantic_projector_->projectPoint(
-            point, *job.camera_info, *camera_from_target, pixel))
-        {
-          image_circle[static_cast<std::size_t>(segment)] = pixel;
-        }
-      }
-      const auto color = candidate.category == ddlzd::Category::kSafest ? cv::Scalar(0, 255, 0) :
-        (candidate.category == ddlzd::Category::kSafe ? cv::Scalar(0, 165, 255) :
-        (candidate.category == ddlzd::Category::kRisky ? cv::Scalar(0, 0, 255) :
-        cv::Scalar(160, 160, 160)));
-      for (std::size_t segment = 0U; segment < image_circle.size(); ++segment) {
-        const std::size_t next = (segment + 1U) % image_circle.size();
-        if (image_circle[segment] && image_circle[next]) {
-          cv::line(
-            annotated, *image_circle[segment], *image_circle[next], color, 3, cv::LINE_AA);
-        }
-      }
-    }
   }
 
   zones_publisher_->publish(output);
@@ -945,10 +828,6 @@ void LiveLandingZoneNode::publishResults(
   pcl::toROSMsg(*job.cloud, cloud_message);
   cloud_message.header = output.header;
   map_publisher_->publish(cloud_message);
-  if (!annotated.empty() && job.image) {
-    auto debug_message = cv_bridge::CvImage(job.image->header, "bgr8", annotated).toImageMsg();
-    debug_image_publisher_->publish(*debug_message);
-  }
 }
 
 void LiveLandingZoneNode::publishDiagnostic(
@@ -962,8 +841,8 @@ void LiveLandingZoneNode::publishDiagnostic(
   array.header.stamp = stamp;
   diagnostic_msgs::msg::DiagnosticStatus status;
   status.level = static_cast<std::uint8_t>(level);
-  status.name = get_fully_qualified_name() + std::string(": fusion");
-  status.hardware_id = "ouster_gremsy_fusion";
+  status.name = get_node_base_interface()->get_fully_qualified_name() + std::string(": lidar");
+  status.hardware_id = "ouster_lidar_only";
   status.message = message;
   status.values.push_back(keyValue("map_points", std::to_string(points)));
   status.values.push_back(keyValue("candidates", std::to_string(candidates)));

@@ -28,8 +28,7 @@ RiskClassifier::RiskClassifier(RiskConfig config)
   {
     throw std::invalid_argument("risk thresholds must be ordered within [0, 1]");
   }
-  if (!(config_.minimum_camera_coverage >= 0.0 && config_.minimum_camera_coverage <= 1.0 &&
-    config_.minimum_clearance_coverage >= 0.0 &&
+  if (!(config_.minimum_clearance_coverage >= 0.0 &&
     config_.minimum_clearance_coverage <= 1.0 &&
     config_.slope_good_deg >= 0.0 && config_.slope_bad_deg > config_.slope_good_deg &&
     config_.relief_good_m >= 0.0 && config_.relief_bad_m > config_.relief_good_m &&
@@ -54,11 +53,9 @@ void RiskClassifier::classify(Candidate & candidate) const
   }
 
   const auto & g = candidate.geometry;
-  const bool camera_usable = candidate.camera.valid &&
-    candidate.camera.coverage_fraction >= config_.minimum_camera_coverage;
   const bool clearance_usable =
     g.clearance_observed_fraction >= config_.minimum_clearance_coverage;
-  if (!camera_usable || !clearance_usable) {
+  if (!clearance_usable) {
     candidate.risk_score = std::numeric_limits<double>::quiet_NaN();
     candidate.category = Category::kUnknown;
     return;
@@ -78,21 +75,15 @@ void RiskClassifier::classify(Candidate & candidate) const
   const double coverage_risk = 1.0 - increasingRisk(
     g.observed_fraction, config_.observed_bad_fraction, config_.observed_good_fraction);
 
-  const double tree_risk = std::clamp(
-    0.55 * candidate.camera.tree_fraction + 0.45 * candidate.camera.tree_score, 0.0, 1.0);
-  const double texture_risk = candidate.camera.texture_risk;
-  const double grass_bonus = candidate.camera.grass_fraction;
-
+  // Geometry-only score. Weights sum to one so every category is fully
+  // explainable from the live point cloud without a favorable missing modality.
   candidate.risk_score = std::clamp(
-    0.23 * obstacle_risk +
-    0.18 * clearance_risk +
-    0.17 * tree_risk +
-    0.14 * relief_risk +
-    0.10 * roughness_risk +
-    0.07 * texture_risk +
-    0.06 * slope_risk +
-    0.05 * coverage_risk -
-    0.10 * grass_bonus,
+    0.27 * obstacle_risk +
+    0.23 * clearance_risk +
+    0.17 * relief_risk +
+    0.13 * roughness_risk +
+    0.12 * slope_risk +
+    0.08 * coverage_risk,
     0.0, 1.0);
 
   if (candidate.risk_score <= config_.safest_threshold) {

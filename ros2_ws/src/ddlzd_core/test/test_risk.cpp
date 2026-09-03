@@ -5,21 +5,6 @@
 #include <cmath>
 #include <stdexcept>
 
-TEST(RiskClassifier, FailsClosedWithoutCameraEvidence)
-{
-  ddlzd::Candidate candidate;
-  candidate.geometry_valid = true;
-  candidate.geometry.observed_fraction = 1.0;
-  candidate.geometry.clearance_observed_fraction = 1.0;
-  candidate.geometry.nearest_obstacle_clearance_m = 10.0;
-
-  ddlzd::RiskClassifier classifier(ddlzd::RiskConfig{});
-  classifier.classify(candidate);
-
-  EXPECT_EQ(candidate.category, ddlzd::Category::kUnknown);
-  EXPECT_TRUE(std::isnan(candidate.risk_score));
-}
-
 TEST(RiskClassifier, ClearObservedCandidateIsSafest)
 {
   ddlzd::Candidate candidate;
@@ -30,9 +15,6 @@ TEST(RiskClassifier, ClearObservedCandidateIsSafest)
   candidate.geometry.slope_deg = 0.0;
   candidate.geometry.relief_m = 0.0;
   candidate.geometry.roughness_m = 0.0;
-  candidate.camera.valid = true;
-  candidate.camera.coverage_fraction = 1.0;
-  candidate.camera.grass_fraction = 0.8;
 
   ddlzd::RiskClassifier classifier(ddlzd::RiskConfig{});
   classifier.classify(candidate);
@@ -41,21 +23,23 @@ TEST(RiskClassifier, ClearObservedCandidateIsSafest)
   EXPECT_LE(candidate.risk_score, 0.33);
 }
 
-TEST(RiskClassifier, InsufficientCameraCoverageHasNoNumericScore)
+TEST(RiskClassifier, HazardousGeometryIsRisky)
 {
   ddlzd::Candidate candidate;
   candidate.geometry_valid = true;
-  candidate.geometry.observed_fraction = 1.0;
+  candidate.geometry.observed_fraction = 0.70;
   candidate.geometry.clearance_observed_fraction = 1.0;
-  candidate.geometry.nearest_obstacle_clearance_m = 10.0;
-  candidate.camera.valid = true;
-  candidate.camera.coverage_fraction = 0.54;
+  candidate.geometry.nearest_obstacle_clearance_m = 2.0;
+  candidate.geometry.obstacle_count = 80U;
+  candidate.geometry.slope_deg = 8.0;
+  candidate.geometry.relief_m = 4.5;
+  candidate.geometry.roughness_m = 0.55;
 
   ddlzd::RiskClassifier classifier(ddlzd::RiskConfig{});
   classifier.classify(candidate);
 
-  EXPECT_EQ(candidate.category, ddlzd::Category::kUnknown);
-  EXPECT_TRUE(std::isnan(candidate.risk_score));
+  EXPECT_EQ(candidate.category, ddlzd::Category::kRisky);
+  EXPECT_GT(candidate.risk_score, 0.62);
 }
 
 TEST(RiskClassifier, InsufficientClearanceCoverageHasNoNumericScore)
@@ -65,8 +49,6 @@ TEST(RiskClassifier, InsufficientClearanceCoverageHasNoNumericScore)
   candidate.geometry.observed_fraction = 1.0;
   candidate.geometry.clearance_observed_fraction = 0.54;
   candidate.geometry.nearest_obstacle_clearance_m = 10.0;
-  candidate.camera.valid = true;
-  candidate.camera.coverage_fraction = 1.0;
 
   ddlzd::RiskClassifier classifier(ddlzd::RiskConfig{});
   classifier.classify(candidate);

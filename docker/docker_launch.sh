@@ -1,17 +1,22 @@
 #!/usr/bin/env bash
 
-# Allow local Docker containers to connect to X server
-xhost +local:docker >/dev/null 2>&1
+set -euo pipefail
 
-docker run --name DDLZD --rm -it --privileged \
-  --gpus all --network host \
-  -e DISPLAY=$DISPLAY \
-  -e XAUTHORITY=$XAUTHORITY \
-  -v /tmp/.X11-unix:/tmp/.X11-unix \
-  -v ~/Documents/robotspace/DDLZD_ws/Drone-Delivery-Landing-Zone-Detection:/home/airsim_user/Drone-Delivery-Landing-Zone-Detection \
-  -v ~/Documents/robotspace/ws_2025_3dmapoctoserver/bt_pcds:/home/airsim_user/Drone-Delivery-Landing-Zone-Detection/bt_pcds \
-  --entrypoint /bin/bash \
-  giri6937/lam:latest
+image="${DDLZD_IMAGE:-ddlzd-lidar-only:humble}"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "${script_dir}/.." && pwd)"
+config_file="${DDLZD_CONFIG:-${repo_root}/ros2_ws/src/ddlzd_ros/config/live_fusion.yaml}"
+tty_args=()
+if [ -t 0 ]; then
+  tty_args=(-it)
+fi
 
-# Optional: tighten security again after container exits (uncomment if desired)
-# xhost -local:docker >/dev/null 2>&1
+xhost +local:root +local:docker >/dev/null 2>&1 || true
+
+docker run --name ddlzd-lidar-only --rm "${tty_args[@]}" --privileged \
+  --runtime nvidia --network host --ipc host \
+  -e DISPLAY="${DISPLAY:-}" \
+  -e XAUTHORITY="${XAUTHORITY:-}" \
+  -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
+  -v "${config_file}:/config/live_fusion.yaml:ro" \
+  "${image}" "$@"

@@ -2,14 +2,11 @@
 
 #include "ddlzd_core/detector.hpp"
 #include "ddlzd_core/risk.hpp"
-#include "ddlzd_ros/semantic_projector.hpp"
 
 #include <ddlzd_msgs/msg/landing_zone_array.hpp>
 #include <diagnostic_msgs/msg/diagnostic_array.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_lifecycle/lifecycle_node.hpp>
-#include <sensor_msgs/msg/camera_info.hpp>
-#include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
@@ -54,8 +51,6 @@ private:
   {
     rclcpp::Time stamp;
     pcl::PointCloud<pcl::PointXYZI>::Ptr cloud;
-    sensor_msgs::msg::Image::ConstSharedPtr image;
-    sensor_msgs::msg::CameraInfo::ConstSharedPtr camera_info;
     Eigen::Vector3d sensor_origin{Eigen::Vector3d::Zero()};
   };
 
@@ -78,16 +73,14 @@ private:
   void pointCloudCallback(sensor_msgs::msg::PointCloud2::ConstSharedPtr message);
   [[nodiscard]] CloudFrame transformAndDeskew(
     const sensor_msgs::msg::PointCloud2 & message) const;
-  void imageCallback(sensor_msgs::msg::Image::ConstSharedPtr message);
-  void cameraInfoCallback(sensor_msgs::msg::CameraInfo::ConstSharedPtr message);
   void scheduleDetection();
   void workerLoop();
   void processJob(const Job & job);
   void updateTracks(std::vector<ddlzd::Candidate> & candidates, const rclcpp::Time & stamp);
+  void updateSelectedBestLandingZone(const std::vector<ddlzd::Candidate> & candidates);
   void publishResults(
     const Job & job, const std::vector<ddlzd::Candidate> & candidates,
-    bool camera_fused, double processing_ms, const cv::Mat & debug_image,
-    const std::optional<Eigen::Isometry3d> & camera_from_target);
+    double processing_ms);
   void publishDiagnostic(
     const rclcpp::Time & stamp, int level, const std::string & message,
     std::size_t points, std::size_t candidates, double processing_ms);
@@ -95,18 +88,13 @@ private:
 
   ddlzd::DetectorConfig loadDetectorConfig();
   ddlzd::RiskConfig loadRiskConfig();
-  SemanticConfig loadSemanticConfig();
 
   std::string point_cloud_topic_;
-  std::string image_topic_;
-  std::string camera_info_topic_;
   std::string target_frame_;
   std::string algorithm_;
   double rolling_window_sec_{3.0};
   double detection_period_sec_{0.5};
   double local_map_radius_m_{30.0};
-  double sync_tolerance_sec_{0.05};
-  double image_buffer_sec_{2.0};
   double tf_timeout_sec_{0.10};
   double max_cloud_age_sec_{0.5};
   double max_scan_duration_sec_{0.5};
@@ -116,32 +104,24 @@ private:
   std::uint32_t minimum_stable_observations_{3U};
   double safest_threshold_{0.33};
   double safe_threshold_{0.62};
-  double minimum_camera_coverage_{0.55};
   bool input_is_motion_compensated_{false};
   double deskew_tf_sampling_sec_{0.002};
 
   std::unique_ptr<ddlzd::Detector> detector_;
   std::unique_ptr<ddlzd::RiskClassifier> risk_classifier_;
-  std::unique_ptr<SemanticProjector> semantic_projector_;
   std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
 
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_subscription_;
-  rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_subscription_;
-  rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_subscription_;
   rclcpp::TimerBase::SharedPtr detection_timer_;
 
   rclcpp_lifecycle::LifecyclePublisher<ddlzd_msgs::msg::LandingZoneArray>::SharedPtr zones_publisher_;
   rclcpp_lifecycle::LifecyclePublisher<visualization_msgs::msg::MarkerArray>::SharedPtr markers_publisher_;
-  rclcpp_lifecycle::LifecyclePublisher<sensor_msgs::msg::Image>::SharedPtr debug_image_publisher_;
   rclcpp_lifecycle::LifecyclePublisher<sensor_msgs::msg::PointCloud2>::SharedPtr map_publisher_;
   rclcpp_lifecycle::LifecyclePublisher<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr diagnostics_publisher_;
 
   std::mutex cloud_mutex_;
   std::deque<CloudFrame> cloud_frames_;
-  std::mutex image_mutex_;
-  std::deque<sensor_msgs::msg::Image::ConstSharedPtr> images_;
-  sensor_msgs::msg::CameraInfo::ConstSharedPtr camera_info_;
 
   std::atomic_bool worker_running_{false};
   std::thread worker_thread_;
@@ -152,6 +132,7 @@ private:
   std::mutex tracks_mutex_;
   std::vector<Track> tracks_;
   std::uint64_t next_track_id_{1U};
+  std::optional<std::uint64_t> selected_best_track_id_;
 };
 
 }  // namespace ddlzd_ros

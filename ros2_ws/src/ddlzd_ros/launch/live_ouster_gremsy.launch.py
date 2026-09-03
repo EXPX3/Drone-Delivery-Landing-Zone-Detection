@@ -21,8 +21,6 @@ def generate_launch_description() -> LaunchDescription:
     sensor_hostname = LaunchConfiguration("sensor_hostname")
     lidar_mode = LaunchConfiguration("lidar_mode")
     timestamp_mode = LaunchConfiguration("timestamp_mode")
-    image_topic = LaunchConfiguration("image_topic")
-    camera_info_topic = LaunchConfiguration("camera_info_topic")
     target_frame = LaunchConfiguration("target_frame")
     config_file = LaunchConfiguration("config_file")
     use_rviz = LaunchConfiguration("use_rviz")
@@ -51,8 +49,6 @@ def generate_launch_description() -> LaunchDescription:
             config_file,
             {
                 "point_cloud_topic": "/ouster/points",
-                "image_topic": image_topic,
-                "camera_info_topic": camera_info_topic,
                 "target_frame": target_frame,
                 "input_is_motion_compensated": False,
             },
@@ -115,21 +111,13 @@ def generate_launch_description() -> LaunchDescription:
                 description="Required Ouster time source configured for the vehicle time architecture.",
             ),
             DeclareLaunchArgument(
-                "image_topic",
-                description="Required rectified Gremsy BGR/RGB sensor_msgs/Image topic.",
-            ),
-            DeclareLaunchArgument(
-                "camera_info_topic",
-                description="Required calibrated sensor_msgs/CameraInfo topic matching image_topic.",
-            ),
-            DeclareLaunchArgument(
                 "target_frame",
-                description="Required gravity-aligned local frame with timestamped LiDAR and gimbal/camera TF.",
+                description="Required gravity-aligned local frame with timestamped LiDAR TF.",
             ),
             DeclareLaunchArgument(
                 "config_file",
                 default_value=str(package_share / "config" / "live_fusion.yaml"),
-                description="Complete algorithm, timing, fusion, and tracking parameter YAML.",
+                description="Complete geometry algorithm, timing, risk, and tracking parameter YAML.",
             ),
             DeclareLaunchArgument("use_rviz", default_value="true"),
             ouster,
