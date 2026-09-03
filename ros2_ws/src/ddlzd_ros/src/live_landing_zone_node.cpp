@@ -136,6 +136,14 @@ std::size_t positiveSize(const int value, const std::string & parameter)
   return static_cast<std::size_t>(value);
 }
 
+std::size_t nonNegativeSize(const int value, const std::string & parameter)
+{
+  if (value < 0) {
+    throw std::invalid_argument(parameter + " must be a non-negative integer");
+  }
+  return static_cast<std::size_t>(value);
+}
+
 }  // namespace
 
 LiveLandingZoneNode::LiveLandingZoneNode(const rclcpp::NodeOptions & options)
@@ -182,7 +190,7 @@ ddlzd::DetectorConfig LiveLandingZoneNode::loadDetectorConfig()
   config.normal_neighbors = positiveSize(
     declare_parameter<int>("detector.normal_neighbors", static_cast<int>(config.normal_neighbors)),
     "detector.normal_neighbors");
-  config.obstacle_min_points = positiveSize(
+  config.obstacle_min_points = nonNegativeSize(
     declare_parameter<int>("detector.obstacle_min_points", static_cast<int>(config.obstacle_min_points)),
     "detector.obstacle_min_points");
   config.angular_bins = positiveSize(

@@ -73,7 +73,7 @@ Detector::Detector(DetectorConfig config)
     config_.nms_distance_m > 0.0 && config_.plane_inlier_threshold_m > 0.0 &&
     config_.safety_margin_m >= 0.0 &&
     config_.obstacle_search_radius_m >= config_.landing_radius_m + config_.safety_margin_m &&
-    config_.obstacle_height_m > 0.0 &&
+    config_.obstacle_height_m >= 0.0 &&
     config_.region_smoothness_deg > 0.0 && config_.region_smoothness_deg < 90.0 &&
     config_.curvature_threshold > 0.0 && config_.max_slope_deg > 0.0 &&
     config_.max_slope_deg < 90.0 && config_.min_density_m2 > 0.0 &&
@@ -84,7 +84,7 @@ Detector::Detector(DetectorConfig config)
   }
   if (config_.angular_bins == 0U || config_.radial_bins == 0U ||
     config_.normal_neighbors < 3U || config_.min_plane_points < 3U ||
-    config_.obstacle_min_points == 0U || config_.max_candidates == 0U)
+    config_.max_candidates == 0U)
   {
     throw std::invalid_argument("invalid detector count parameter");
   }
@@ -321,7 +321,10 @@ std::vector<Candidate> Detector::detect(
           candidate.rejection_reason = "relief";
         } else if (candidate.geometry.roughness_m > config_.max_roughness_m) {
           candidate.rejection_reason = "roughness";
-        } else if (obstacle_count >= config_.obstacle_min_points) {
+        } else if (
+          (config_.obstacle_min_points == 0U && obstacle_count > 0U) ||
+          (config_.obstacle_min_points > 0U && obstacle_count >= config_.obstacle_min_points))
+        {
           candidate.rejection_reason = "obstacle";
         } else {
           candidate.geometry_valid = true;

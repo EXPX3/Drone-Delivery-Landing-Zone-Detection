@@ -24,7 +24,7 @@
       plane_inlier_threshold_m: 0.08
       region_smoothness_deg: 6.0
       curvature_threshold: 0.08
-      obstacle_height_m: 0.10
+      obstacle_height_m: 0.0
       max_slope_deg: 12.0
       min_density_m2: 8.0
       max_relief_m: 5.0
@@ -32,7 +32,7 @@
       min_observed_fraction: 0.70
       min_plane_points: 120
       normal_neighbors: 30
-      obstacle_min_points: 5
+      obstacle_min_points: 0
       angular_bins: 36
       radial_bins: 5
       max_candidates: 200
