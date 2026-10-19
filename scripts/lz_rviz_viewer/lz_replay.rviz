@@ -1,0 +1,63 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+  - Class: rviz_common/Time
+    Name: Time
+Visualization Manager:
+  Class: ""
+  Global Options:
+    Background Color: 24; 29; 34
+    Fixed Frame: lz_world
+    Frame Rate: 30
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Ground Grid
+      Plane: XY
+      Cell Size: 5
+      Color: 90; 100; 110
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Point Cloud
+      Topic:
+        Value: /ddlzd/pointcloud
+      Queue Size: 1
+      Size (Pixels): 2
+      Style: Points
+      Color Transformer: AxisColor
+      Axis: Z
+      Min Color: 40; 90; 180
+      Max Color: 230; 210; 80
+      Autocompute Intensity Bounds: true
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Landing Zones
+      Topic:
+        Value: /ddlzd/landing_zones
+      Queue Size: 1
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Live Camera Geometry
+      Topic:
+        Value: /ddlzd/replay_markers
+      Queue Size: 1
+    - Class: rviz_default_plugins/Image
+      Name: Camera Image
+      Image Topic:
+        Value: /ddlzd/camera_overlay
+      Queue Size: 1
+      Transport Hint: compressed
+      Normalize Range: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 120
+      Pitch: 0.75
+      Yaw: 0.75
+      Focal Point:
+        X: 0
+        Y: 0
+        Z: 550
+Window Geometry:
+  Width: 1600
+  Height: 950
+  Hide Left Dock: false
+  Hide Right Dock: false

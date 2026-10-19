@@ -1,0 +1,36 @@
+# Fast RViz Landing-Zone Replay
+
+This viewer is the efficient native ROS 2 alternative to the synchronized browser
+viewer. It publishes a downsampled static `PointCloud2`, batched landing-zone
+`MarkerArray` messages, live camera/frustum markers, and the annotated camera image.
+All live output for a replay step uses the same ROS image timestamp.
+
+Launch with the existing `cargopack:2026` image:
+
+```bash
+cd /home/gvb/Documents/robotspace/DDLZD_ws/Drone-Delivery-Landing-Zone-Detection
+scripts/lz_rviz_viewer/run_rviz_replay.sh
+```
+
+Optional positional arguments are bag path, playback rate, and visualization FPS:
+
+```bash
+scripts/lz_rviz_viewer/run_rviz_replay.sh \
+  /media/gvb/ssd24ubuntu/bags/Bagfilles_Feb13_2026/recovered_bag 1.0 12
+```
+
+Topics:
+
+- `/ddlzd/pointcloud`: static local-origin point cloud;
+- `/ddlzd/landing_zones`: static risk-colored solutions;
+- `/ddlzd/replay_markers`: UAV, trajectory, frustum, footprint, and pink visible zones;
+- `/ddlzd/camera_overlay/compressed`: synchronized annotated JPEG camera image
+  consumed through RViz's `compressed` image transport.
+
+The point cloud is limited to 250,000 deterministic samples by default and shifted
+to a local XY origin to avoid float32 precision loss in RViz. The camera image carries
+the replay frame, bag-relative time, and original ROS timestamp.
+
+The first launch still scans the bag to reconstruct TF/GNSS registration. Once replay
+starts, rendering is native RViz/Ogre and avoids Plotly, HTTP polling, JPEG encoding,
+and browser-side point-cloud redraws.
