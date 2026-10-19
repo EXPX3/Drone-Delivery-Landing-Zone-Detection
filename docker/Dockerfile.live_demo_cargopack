@@ -2,7 +2,7 @@ FROM nvcr.io/nvidia/isaac/ros:aarch64-ros2_humble_77e6a678c2058abf96bedcb8f7dd43
 
 SHELL ["/bin/bash", "-lc"]
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update --allow-releaseinfo-change && apt-get install -y --no-install-recommends \
     build-essential \
     libeigen3-dev \
     libpcl-dev \
@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-rmw-cyclonedds-cpp \
     ros-humble-rviz2 \
     ros-humble-tf2-eigen \
+    ros-humble-tf2-ros \
     ros-humble-tf2-sensor-msgs \
     ros-humble-visualization-msgs
 

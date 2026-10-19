@@ -77,6 +77,7 @@ private:
   void workerLoop();
   void processJob(const Job & job);
   void updateTracks(std::vector<ddlzd::Candidate> & candidates, const rclcpp::Time & stamp);
+  void updateSelectedBestLandingZone(const std::vector<ddlzd::Candidate> & candidates);
   void publishResults(
     const Job & job, const std::vector<ddlzd::Candidate> & candidates,
     double processing_ms);
@@ -131,6 +132,7 @@ private:
   std::mutex tracks_mutex_;
   std::vector<Track> tracks_;
   std::uint64_t next_track_id_{1U};
+  std::optional<std::uint64_t> selected_best_track_id_;
 };
 
 }  // namespace ddlzd_ros

@@ -24,12 +24,13 @@ From the repository root:
 ```bash
 docker build --file docker/Dockerfile.live_demo_cargopack --tag ddlzd-lidar-only:humble .
 sudo ./docker/configure_ouster_network.sh
-xhost +local:docker
+xhost +local:root +local:docker
 docker run --rm -it \
   --name ddlzd-lidar-only \
-  --privileged --gpus all --network host --ipc host \
+  --privileged --runtime nvidia --network host --ipc host \
   -e DISPLAY -e XAUTHORITY \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
+  -v "$(pwd)/ros2_ws/src/ddlzd_ros/config/live_fusion.yaml:/config/live_fusion.yaml:ro" \
   ddlzd-lidar-only:humble
 ```
 
@@ -43,12 +44,74 @@ Inside the container:
 ros2 launch ddlzd_ros live_ouster_gremsy.launch.py \
   sensor_hostname:=192.168.1.10 \
   lidar_mode:=1024x10 \
-  timestamp_mode:=TIME_FROM_PTP_1588 \
+  timestamp_mode:=TIME_FROM_ROS_TIME \
   target_frame:=map \
+  config_file:=/config/live_fusion.yaml \
   use_rviz:=true
 ```
 
-The retained launch filename preserves compatibility; it contains no Gremsy/RGB components. It starts the Ouster driver, point-cloud/IMU processors, lifecycle detector, automatic configure/activate transitions, and RViz. Use `TIME_FROM_INTERNAL_OSC` if PTP is not configured, with TF on the same clock.
+The retained launch filename preserves compatibility; it contains no Gremsy/RGB components. It starts the Ouster driver, point-cloud/IMU processors, lifecycle detector, automatic configure/activate transitions, and RViz. Use `TIME_FROM_PTP_1588` only when the sensor and TF are on the same synchronized PTP clock. For a direct link-local Ouster connection without PTP, use `TIME_FROM_ROS_TIME`; `TIME_FROM_INTERNAL_OSC` can make the detector reject clouds as stale because the sensor clock is not comparable with ROS wall time.
+
+Tested Jetson direct-link example:
+
+```bash
+sudo ./docker/configure_ouster_network.sh
+DISPLAY=:1 xhost +local:root +local:docker
+docker run -d --name ddlzd-lidar-only --rm \
+  --privileged --runtime nvidia --network host --ipc host \
+  -e DISPLAY=:1 -e XAUTHORITY= \
+  -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
+  -v /home/giri/Documents/robotspace/DDLZD_WS/ros2_ws/src/ddlzd_ros/config/live_fusion.yaml:/config/live_fusion.yaml:ro \
+  ddlzd-lidar-only:humble \
+  ros2 launch ddlzd_ros live_ouster_gremsy.launch.py \
+    sensor_hostname:=169.254.210.24 \
+    lidar_mode:=1024x10 \
+    timestamp_mode:=TIME_FROM_ROS_TIME \
+    target_frame:=os_sensor \
+    config_file:=/config/live_fusion.yaml \
+    use_rviz:=true
+```
+
+Stop the launched demo completely:
+
+```bash
+docker rm -f ddlzd-lidar-only
+```
+
+## After changing detector YAML
+
+The tested Jetson launch command bind-mounts `ros2_ws/src/ddlzd_ros/config/live_fusion.yaml` into the container as `/config/live_fusion.yaml`. After changing values such as `obstacle_height_m` or `obstacle_min_points`, restart the container; no Docker rebuild is needed for YAML-only changes:
+
+```bash
+docker rm -f ddlzd-lidar-only
+```
+
+Then rerun the tested Jetson launch command above. Rebuild the Docker image only after changing C++ source, launch files, RViz config, package metadata, or Docker dependencies.
+
+`obstacle_min_points` is a minimum reject threshold. Set `obstacle_min_points: 0` for strict no-obstacle mode, which rejects a candidate when any downsampled point inside the landing footprint is higher than `obstacle_height_m` above the fitted plane. With `obstacle_height_m: 0.0`, any point above the fitted plane counts as an obstacle; this is intentionally aggressive and may reject nearly all candidates in noisy live data.
+
+The detector treats the Z axis of `target_frame` as "up" when fitting horizontal landing planes and measuring points above a candidate. The tested direct-link command uses `target_frame:=os_sensor`; use a gravity-aligned frame such as `map` or `odom` if available for physically meaningful slope and obstacle-height checks.
+
+## Current Ouster sensor settings
+
+- Sensor: `OS-1-128`, SN `122608004931` - 128-channel Ouster lidar currently running.
+- IP: `169.254.210.24` - sensor address on the link-local lidar network.
+- UDP destination: `169.254.50.1` - Jetson interface receiving lidar packets.
+- Lidar mode: `1024x10` - 1024 columns per scan at 10 Hz.
+- Lidar UDP profile: `RNG19_RFL8_SIG16_NIR16` - range, reflectivity, signal, and near-IR fields are streamed.
+- IMU UDP profile: `LEGACY` - standard Ouster IMU packet format.
+- Lidar UDP port: `41229` - current auto-assigned lidar data port.
+- IMU UDP port: `45166` - current auto-assigned IMU data port.
+- Columns per packet: `16` - each UDP packet carries 16 lidar columns.
+- Return order: `STRONGEST_TO_WEAKEST` - strongest return is prioritized first.
+- Timestamp mode on sensor: `TIME_FROM_INTERNAL_OSC` - sensor hardware config uses its internal oscillator.
+- Launch timestamp mode used for working demo: `TIME_FROM_ROS_TIME` - ROS driver stamped messages with ROS time to avoid stale-cloud rejection.
+- Operating mode: `NORMAL` - sensor is actively scanning.
+- Azimuth window: `0-360 deg` - full 360-degree scan enabled.
+- Minimum range threshold: `50 cm` - points closer than 0.5 m are filtered by sensor setting.
+- Signal multiplier: `1` - default signal scaling.
+- Phase lock: `disabled` - no phase locking active.
+- Sync/NMEA input: active-high, NMEA `9600 baud` - external timing inputs are configured but not used for the working demo.
 
 ## Use an existing live cloud or bag
 
@@ -57,10 +120,11 @@ ros2 launch ddlzd_ros live_fusion_only.launch.py \
   point_cloud_topic:=/ouster/points \
   target_frame:=map \
   input_is_motion_compensated:=false \
+  config_file:=/config/live_fusion.yaml \
   use_rviz:=true
 ```
 
-Set `input_is_motion_compensated:=true` only for an already-deskewed cloud. Override the central configuration with `config_file:=/config/live_fusion.yaml`.
+Set `input_is_motion_compensated:=true` only for an already-deskewed cloud. The Docker examples mount the editable host YAML at `/config/live_fusion.yaml`; use `config_file:=/config/live_fusion.yaml` so YAML-only changes take effect after a container restart.
 
 ## Outputs and checks
 
