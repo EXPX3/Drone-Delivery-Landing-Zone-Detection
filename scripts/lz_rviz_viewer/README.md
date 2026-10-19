@@ -32,6 +32,9 @@ Topics:
 The point cloud is limited to 250,000 deterministic samples by default and shifted
 to a local XY origin to avoid float32 precision loss in RViz. The camera image carries
 the replay frame, bag-relative time, and original ROS timestamp.
+The launcher enables NVIDIA PRIME OpenGL offload for responsive orbit and wheel zoom
+on the hybrid RTX laptop. The LiDAR map is static by design; the UAV, trajectory,
+camera frustum, footprint, and pink visible-zone layer update during replay.
 
 The first launch still scans the bag to reconstruct TF/GNSS registration. Once replay
 starts, rendering is native RViz/Ogre and avoids Plotly, HTTP polling, JPEG encoding,

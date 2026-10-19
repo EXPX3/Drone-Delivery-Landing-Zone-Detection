@@ -13,9 +13,12 @@ if [[ -f "${xauthority}" ]]; then
 fi
 
 xhost +local:docker >/dev/null 2>&1 || true
-docker run --rm --name ddlzd-lz-rviz --network host --ipc host \
+docker run --rm --name ddlzd-lz-rviz --gpus all --network host --ipc host \
   -e DISPLAY="${DISPLAY:-:0}" \
   -e QT_X11_NO_MITSHM=1 \
+  -e NVIDIA_DRIVER_CAPABILITIES=all \
+  -e __NV_PRIME_RENDER_OFFLOAD=1 \
+  -e __GLX_VENDOR_LIBRARY_NAME=nvidia \
   "${xauth_args[@]}" \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   -v "${repo_root}:/workspace" \

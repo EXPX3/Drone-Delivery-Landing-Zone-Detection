@@ -48,6 +48,12 @@ Visualization Manager:
         Value: /ddlzd/replay_markers
       Queue Size: 1
       Value: true
+  Tools:
+    - Class: rviz_default_plugins/Interact
+      Hide Inactive Objects: true
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
   Value: true
   Views:
     Current:
@@ -59,6 +65,8 @@ Visualization Manager:
         X: 0
         Y: 0
         Z: 550
+      Target Frame: <Fixed Frame>
+      Value: Orbit (rviz_default_plugins)
 Window Geometry:
   Width: 1600
   Height: 950
