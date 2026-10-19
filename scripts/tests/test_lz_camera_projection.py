@@ -20,7 +20,7 @@ from lz_camera_projection import (  # noqa: E402
     zone_ring,
 )
 from project_lz_into_bag_camera import draw_zones  # noqa: E402
-from lz_bag_replay_viewer.replay_server import frustum_visible_ranks  # noqa: E402
+from lz_bag_replay_viewer.replay_server import displayed_zone_ring, frustum_visible_ranks  # noqa: E402
 
 
 class ProjectionGeometryTests(unittest.TestCase):
@@ -110,6 +110,14 @@ class ProjectionGeometryTests(unittest.TestCase):
             width=200, height=200, vertical_offset=0.0,
         )
         self.assertEqual(ranks, [1])
+
+    def test_displayed_zone_ring_keeps_point_cloud_elevation(self):
+        zone = {
+            "x": 10.0, "y": 20.0, "z": 549.5, "radius": 2.5,
+            "normal_x": 0.0, "normal_y": 0.0, "normal_z": 1.0,
+        }
+        ring = displayed_zone_ring(zone)
+        np.testing.assert_allclose(ring[:, 2], 549.5)
 
 
 if __name__ == "__main__":

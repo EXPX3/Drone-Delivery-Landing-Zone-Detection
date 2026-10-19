@@ -47,6 +47,12 @@ def orthometric_from_map(utm_to_map: Transform, vertical_offset: float) -> Trans
     return compose(utm_to_map, ortho_to_gnss).inverse()
 
 
+def displayed_zone_ring(zone: dict, samples: int = 48) -> np.ndarray:
+    """Return an LZ ring in its native point-cloud/orthometric coordinates."""
+
+    return zone_ring(zone, vertical_offset_m=0.0, samples=samples)
+
+
 def camera_footprint(ortho_to_optical: Transform, camera_matrix: np.ndarray, distortion: np.ndarray,
                      width: int, height: int, ground_z: float) -> tuple[list[list[float]], dict[str, list[float]]]:
     camera = ortho_to_optical.translation
@@ -196,7 +202,10 @@ def replay_loop(args: argparse.Namespace, state: ReplayState) -> None:
                 "x": [], "y": [], "z": [], "rank": frustum_ranks,
             }
             for zone in visible_zones:
-                ring = zone_ring(zone, vertical_offset_m=vertical_offset, samples=48)
+                # Zone coordinates already use the point-cloud/orthometric datum.
+                # The geoid-to-GNSS offset is needed only while transforming them
+                # into the UAV map frame for visibility tests, not for map display.
+                ring = displayed_zone_ring(zone, samples=48)
                 ring = np.vstack((ring, ring[0]))
                 for column, axis in enumerate(("x", "y", "z")):
                     visible_lzs[axis].extend(ring[:, column].tolist() + [None])

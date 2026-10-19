@@ -30,6 +30,9 @@ The independently selected 3D landing-zone footprints are redrawn as thick light
 pink (`#FFB6C1`) circles. The landing zones themselves do not move; the pink subset
 changes as the camera frustum moves across the static point cloud. Image overlays
 retain their original risk colors so the two calculations remain visually distinct.
+Pink circles remain in the point cloud's orthometric elevation datum; the configured
+geoid-to-GNSS altitude correction is applied only during camera-frame visibility
+calculation and is not added to their displayed elevation.
 
 The exact original viewer colors are preserved: `green` (`#008000`) for safest,
 `orange` (`#FFA500`) for safe, `red` (`#FF0000`) for risky, and `lightgreen`
