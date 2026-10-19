@@ -11,6 +11,21 @@ Additional workflows:
 - [Offline point-cloud, orthophoto, and landing-zone viewer](scripts/README_pointcloud_crop_viewer.md)
 - [Landing-zone projection into recorded camera images](scripts/README_lz_camera_projection.md)
 - [Synchronized bag, UAV trajectory, camera, and LZ browser replay](scripts/lz_bag_replay_viewer/README.md)
+- [Current demonstration state and launch commands](scripts/DEMO_CURRENT_STATE.md)
+
+## Current landing-zone camera demonstration
+
+The recommended live demonstration uses native RViz2 for the 3D point cloud and
+ROS `image_view` for the synchronized annotated camera stream:
+
+```bash
+cd /home/gvb/Documents/robotspace/DDLZD_ws/Drone-Delivery-Landing-Zone-Detection
+scripts/lz_rviz_viewer/run_rviz_replay.sh
+```
+
+Allow approximately 35-40 seconds for the initial TF/GNSS registration scan. See
+[`scripts/DEMO_CURRENT_STATE.md`](scripts/DEMO_CURRENT_STATE.md) for inputs, expected
+windows, controls, validation results, alternative browser mode, and troubleshooting.
 
 ---
 

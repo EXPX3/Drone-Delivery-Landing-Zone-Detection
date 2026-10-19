@@ -26,10 +26,11 @@ docker run --rm --name ddlzd-lz-rviz --gpus all --network host --ipc host \
   -w /workspace \
   --entrypoint bash "${image}" -lc "
     source /opt/ros/humble/setup.bash
+    cp scripts/lz_rviz_viewer/lz_replay.rviz /tmp/ddlzd_lz_replay.rviz
     python3 scripts/lz_rviz_viewer/replay_node.py --bag /bag --rate '${rate}' --fps '${fps}' &
     node_pid=\$!
     ros2 run image_view image_view --ros-args --remap image:=/ddlzd/camera_overlay &
     image_pid=\$!
     trap 'kill \$node_pid \$image_pid 2>/dev/null || true' EXIT INT TERM
-    rviz2 -d scripts/lz_rviz_viewer/lz_replay.rviz
+    rviz2 -d /tmp/ddlzd_lz_replay.rviz
   "

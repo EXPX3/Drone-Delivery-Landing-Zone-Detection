@@ -1,74 +1,157 @@
 Panels:
   - Class: rviz_common/Displays
+    Help Height: 70
     Name: Displays
+    Property Tree Widget:
+      Expanded: ~
+      Splitter Ratio: 0.5
+    Tree Height: 353
   - Class: rviz_common/Views
+    Expanded:
+      - /Current View1
     Name: Views
+    Splitter Ratio: 0.5
   - Class: rviz_common/Time
+    Experimental: false
     Name: Time
+    SyncMode: 0
+    SyncSource: Point Cloud
 Visualization Manager:
   Class: ""
+  Displays:
+    - Alpha: 0.5
+      Cell Size: 5
+      Class: rviz_default_plugins/Grid
+      Color: 90; 100; 110
+      Enabled: true
+      Line Style:
+        Line Width: 0.029999999329447746
+        Value: Lines
+      Name: Ground Grid
+      Normal Cell Count: 0
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Plane: XY
+      Plane Cell Count: 10
+      Reference Frame: <Fixed Frame>
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 563.7239990234375
+        Min Value: 548.4860229492188
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz_default_plugins/PointCloud2
+      Color: 255; 255; 255
+      Color Transformer: AxisColor
+      Decay Time: 0
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 230; 210; 80
+      Max Intensity: 4096
+      Min Color: 40; 90; 180
+      Min Intensity: 0
+      Name: Point Cloud
+      Position Transformer: XYZ
+      Selectable: true
+      Size (Pixels): 2
+      Size (m): 0.009999999776482582
+      Style: Points
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /ddlzd/pointcloud
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: Landing Zones
+      Namespaces:
+        landing_zones_risky: true
+        landing_zones_safe: true
+        landing_zones_safest: true
+        landing_zones_top30: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /ddlzd/landing_zones
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: Live Camera Geometry
+      Namespaces:
+        camera_footprint: true
+        camera_frustum: true
+        camera_visible_lz: true
+        uav: true
+        uav_trajectory: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /ddlzd/replay_markers
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 24; 29; 34
     Fixed Frame: lz_world
     Frame Rate: 30
-  Displays:
-    - Class: rviz_default_plugins/Grid
-      Enabled: true
-      Name: Ground Grid
-      Plane: XY
-      Cell Size: 5
-      Color: 90; 100; 110
-      Value: true
-    - Class: rviz_default_plugins/PointCloud2
-      Enabled: true
-      Name: Point Cloud
-      Topic:
-        Value: /ddlzd/pointcloud
-      Queue Size: 1
-      Size (Pixels): 2
-      Style: Points
-      Color Transformer: AxisColor
-      Axis: Z
-      Min Color: 40; 90; 180
-      Max Color: 230; 210; 80
-      Autocompute Intensity Bounds: true
-      Value: true
-    - Class: rviz_default_plugins/MarkerArray
-      Enabled: true
-      Name: Landing Zones
-      Topic:
-        Value: /ddlzd/landing_zones
-      Queue Size: 1
-      Value: true
-    - Class: rviz_default_plugins/MarkerArray
-      Enabled: true
-      Name: Live Camera Geometry
-      Topic:
-        Value: /ddlzd/replay_markers
-      Queue Size: 1
-      Value: true
+  Name: root
   Tools:
     - Class: rviz_default_plugins/Interact
       Hide Inactive Objects: true
     - Class: rviz_default_plugins/MoveCamera
     - Class: rviz_default_plugins/Select
     - Class: rviz_default_plugins/FocusCamera
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF
   Value: true
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 120
-      Pitch: 0.75
-      Yaw: 0.75
+      Distance: 174.44888305664062
+      Enable Stereo Rendering:
+        Stereo Eye Separation: 0.05999999865889549
+        Stereo Focal Distance: 1
+        Swap Stereo Eyes: false
+        Value: false
       Focal Point:
-        X: 0
-        Y: 0
-        Z: 550
+        X: 48.14995574951172
+        Y: 12.055956840515137
+        Z: 528.0872192382812
+      Focal Shape Fixed Size: true
+      Focal Shape Size: 0.05000000074505806
+      Invert Z Axis: false
+      Name: Current View
+      Near Clip Distance: 0.009999999776482582
+      Pitch: 1.2199995517730713
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz_default_plugins)
+      Yaw: 0.13500849902629852
+    Saved: ~
 Window Geometry:
-  Width: 1600
+  Displays:
+    collapsed: false
   Height: 950
   Hide Left Dock: false
   Hide Right Dock: false
+  QMainWindow State: 000000ff00000000fd00000001000000000000025300000360fc0200000003fb000000100044006900730070006c006100790073010000003b000001e2000000c700fffffffb0000000a00560069006500770073010000022300000136000000a000fffffffb0000000800540069006d0065010000035f0000003c0000003700ffffff000003e70000036000000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  Time:
+    collapsed: false
+  Views:
+    collapsed: false
+  Width: 1600
+  X: 0
+  Y: 32
