@@ -15,7 +15,7 @@ Default inputs:
 - Camera: `/GremsyVIO/image/cpu` (`1280x720`, approximately 30 Hz)
 - Position: `/mavros/global_position/global`
 - Pose: `/tf` and `/tf_static`
-- Zones: the risk-ranked CSV, filtered to the top 30 `safest` zones
+- Zones: every solution in the risk-ranked CSV; only centers inside each image are rendered
 - Coordinate system: EPSG:25832 horizontal coordinates
 
 Outputs:
@@ -28,9 +28,11 @@ Outputs:
 
 The supplied configuration is intentionally marked `provisional`. The bag has no
 `CameraInfo` message and no recorded `gimbal_link_flu -> camera optical` transform.
-The known 1920x1080 camera matrix is scaled to 1280x720, and the standard FLU to
-optical rotation is used, but these two assumptions must be checked against the
-camera pipeline. The configured 45 m vertical datum correction is also an initial
+The known 1920x1080 camera matrix is scaled to 1280x720. Inspection of the recorded
+TF shows that camera optical Z is the gimbal frame's negative Y axis; the projector
+checks every rendered pose against a configurable 30-degree sanity limit. The actual
+mean and maximum tilt are written to the diagnostics JSON. The exact
+camera lever arm still requires measurement. The configured 45 m vertical datum correction is also an initial
 value for converting Bayern orthometric LiDAR heights to GNSS altitude.
 
 For a metrically defensible result, measure and update these fields in
@@ -87,8 +89,8 @@ Open the result:
 xdg-open pcds/lz_camera_projection_calibration.mp4
 ```
 
-Use `--categories safest,safe,risky` to render all risk classes, or change
-`--max-zones` to control the candidate count. Green, orange, and red correspond to
+Use `--categories safest` to show only the green class, or set a positive
+`--max-zones` to limit the candidate count. Green, orange, and red correspond to
 `safest`, `safe`, and `risky`.
 
 ## Verification

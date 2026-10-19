@@ -32,6 +32,14 @@ class ProjectionGeometryTests(unittest.TestCase):
         result = transform_points(transform, np.array([[1.0, 1.0, 1.0]]))
         np.testing.assert_allclose(result, [[3.0, 4.0, 5.0]])
 
+    def test_gremsy_optical_axis_maps_to_negative_gimbal_y(self):
+        optical_to_gimbal = Transform(
+            np.zeros(3), np.array([np.sqrt(0.5), 0.0, 0.0, np.sqrt(0.5)])
+        )
+        np.testing.assert_allclose(
+            optical_to_gimbal.matrix[:3, 2], [0.0, -1.0, 0.0], atol=1e-10
+        )
+
     def test_utm32_matches_proj(self):
         expected = Transformer.from_crs(4326, 25832, always_xy=True).transform(11.6381454, 48.0761299)
         actual = latlon_to_utm32(48.0761299, 11.6381454)

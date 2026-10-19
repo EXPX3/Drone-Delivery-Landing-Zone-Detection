@@ -199,7 +199,22 @@ def draw_zones(frame: np.ndarray, zones: list[dict], map_to_optical: Transform,
     colors = {"safest": (144, 238, 144), "safe": (0, 165, 255), "risky": (0, 0, 255)}
     optical_from_map = map_to_optical.inverse()
     height, width = frame.shape[:2]
-    for zone in reversed(zones):
+    centers_utm = np.asarray(
+        [[float(zone["x"]), float(zone["y"]), float(zone["z"]) + vertical_offset]
+         for zone in zones],
+        dtype=np.float64,
+    )
+    centers_map = transform_points(utm_to_map, centers_utm)
+    centers_optical = transform_points(optical_from_map, centers_map)
+    center_pixels, centers_in_front = project_optical_points(centers_optical, camera_matrix, distortion)
+    centers_in_frame = (
+        centers_in_front
+        & (center_pixels[:, 0] >= 0.0) & (center_pixels[:, 0] < width)
+        & (center_pixels[:, 1] >= 0.0) & (center_pixels[:, 1] < height)
+    )
+    visible_indices = np.flatnonzero(centers_in_frame)
+    for index in reversed(visible_indices):
+        zone = zones[int(index)]
         ring_utm = zone_ring(zone, vertical_offset)
         ring_map = transform_points(utm_to_map, ring_utm)
         ring_optical = transform_points(optical_from_map, ring_map)
@@ -218,7 +233,7 @@ def draw_zones(frame: np.ndarray, zones: list[dict], map_to_optical: Transform,
         color = colors.get(str(zone["category"]), (144, 238, 144))
         cv2.fillPoly(overlay, [polygon], color)
         cv2.polylines(frame, [polygon], True, color, 3, cv2.LINE_AA)
-        center_array = np.rint(np.mean(raster_pixels, axis=0)).astype(int)
+        center_array = np.rint(center_pixels[index]).astype(int)
         center_array = np.clip(center_array, [0, 0], [width - 1, height - 1])
         center = (int(center_array[0]), int(center_array[1]))
         cv2.putText(frame, f"LZ {zone['rank']}", center, cv2.FONT_HERSHEY_SIMPLEX,
@@ -251,6 +266,7 @@ def process_images(args: argparse.Namespace, config: dict, tf_data: dict, utm_to
     last_written = None
     writer = None
     written = skipped_tf = total_visible = 0
+    nadir_tilt_degrees = []
     start_ns = int(args.start_s * 1e9)
     stop_ns = None if args.duration_s <= 0 else start_ns + int(args.duration_s * 1e9)
     while reader.has_next():
@@ -281,8 +297,18 @@ def process_images(args: argparse.Namespace, config: dict, tf_data: dict, utm_to
         except LookupError:
             skipped_tf += 1
             continue
+        map_to_optical = compose(map_to_gimbal, optical)
+        optical_axis_map = map_to_optical.matrix[:3, 2]
+        nadir_tilt = float(np.rad2deg(np.arccos(np.clip(-optical_axis_map[2], -1.0, 1.0))))
+        nadir_tilt_degrees.append(nadir_tilt)
+        if (config["camera"].get("expected_nadir", False)
+                and nadir_tilt > float(config["camera"]["maximum_nadir_tilt_deg"])):
+            raise RuntimeError(
+                f"Camera optical axis is {nadir_tilt:.2f} deg from nadir at t={relative / 1e9:.2f} s; "
+                "check gimbal_to_optical and TF conventions"
+            )
         visible = draw_zones(
-            frame, zones, compose(map_to_gimbal, optical), utm_to_map, camera_matrix,
+            frame, zones, map_to_optical, utm_to_map, camera_matrix,
             distortion, float(config["registration"]["lz_to_gnss_vertical_offset_m"]),
             float(config["output"]["fill_alpha"]),
         )
@@ -308,6 +334,8 @@ def process_images(args: argparse.Namespace, config: dict, tf_data: dict, utm_to
         "frames_written": written,
         "frames_skipped_missing_tf": skipped_tf,
         "mean_visible_zones": total_visible / written,
+        "mean_nadir_tilt_deg": float(np.mean(nadir_tilt_degrees)),
+        "maximum_nadir_tilt_deg": float(np.max(nadir_tilt_degrees)),
     })
     return diagnostics
 
@@ -320,8 +348,8 @@ def main() -> int:
     parser.add_argument("--config", type=Path, default=root / "scripts/config/lz_camera_projection.yaml")
     parser.add_argument("--output", type=Path, default=root / "pcds/lz_camera_projection.mp4")
     parser.add_argument("--diagnostics", type=Path, default=None)
-    parser.add_argument("--categories", default="safest", help="Comma-separated risk categories")
-    parser.add_argument("--max-zones", type=int, default=30)
+    parser.add_argument("--categories", default="all", help="Comma-separated risk categories, or 'all'")
+    parser.add_argument("--max-zones", type=int, default=0, help="Zero loads every matching solution")
     parser.add_argument("--start-s", type=float, default=0.0)
     parser.add_argument("--duration-s", type=float, default=0.0, help="Zero processes to the end")
     parser.add_argument("--output-fps", type=float, default=None)
@@ -335,7 +363,9 @@ def main() -> int:
             "Calibration is marked provisional. Measure the missing values or explicitly pass "
             "--allow-provisional-calibration; provisional output is watermarked."
         )
-    categories = {item.strip() for item in args.categories.split(",") if item.strip()}
+    categories = None if args.categories.strip().lower() == "all" else {
+        item.strip() for item in args.categories.split(",") if item.strip()
+    }
     zones = load_landing_zones(args.landing_zones, categories, args.max_zones)
     tf_data, gps = read_pose_and_gps(args.bag, config)
     utm_to_map, diagnostics = fit_utm_to_map(tf_data, gps, config)
