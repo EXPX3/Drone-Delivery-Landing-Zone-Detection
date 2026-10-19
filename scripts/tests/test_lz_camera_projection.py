@@ -19,6 +19,7 @@ from lz_camera_projection import (  # noqa: E402
     transform_points,
     zone_ring,
 )
+from project_lz_into_bag_camera import draw_zones  # noqa: E402
 
 
 class ProjectionGeometryTests(unittest.TestCase):
@@ -32,12 +33,12 @@ class ProjectionGeometryTests(unittest.TestCase):
         result = transform_points(transform, np.array([[1.0, 1.0, 1.0]]))
         np.testing.assert_allclose(result, [[3.0, 4.0, 5.0]])
 
-    def test_gremsy_optical_axis_maps_to_negative_gimbal_y(self):
-        optical_to_gimbal = Transform(
-            np.zeros(3), np.array([np.sqrt(0.5), 0.0, 0.0, np.sqrt(0.5)])
+    def test_rigid_mount_optical_axis_maps_to_body_down(self):
+        optical_to_body = Transform(
+            np.zeros(3), np.array([np.sqrt(0.5), -np.sqrt(0.5), 0.0, 0.0])
         )
         np.testing.assert_allclose(
-            optical_to_gimbal.matrix[:3, 2], [0.0, -1.0, 0.0], atol=1e-10
+            optical_to_body.matrix[:3, 2], [0.0, 0.0, -1.0], atol=1e-10
         )
 
     def test_utm32_matches_proj(self):
@@ -74,6 +75,22 @@ class ProjectionGeometryTests(unittest.TestCase):
         normal = np.array([0.0, np.sqrt(0.5), np.sqrt(0.5)])
         np.testing.assert_allclose(offsets @ normal, 0.0, atol=1e-10)
         np.testing.assert_allclose(np.linalg.norm(offsets, axis=1), 2.5, atol=1e-10)
+
+    def test_safe_outline_keeps_exact_original_viewer_color(self):
+        frame = np.full((200, 200, 3), 255, dtype=np.uint8)
+        zone = {
+            "rank": 100, "category": "safe", "x": 0.0, "y": 0.0, "z": 0.0,
+            "radius": 2.0, "normal_x": 0.0, "normal_y": 0.0, "normal_z": 1.0,
+        }
+        map_to_optical = Transform(np.array([0.0, 0.0, 10.0]), np.array([1.0, 0.0, 0.0, 0.0]))
+        camera_matrix = np.array([[100.0, 0.0, 100.0], [0.0, 100.0, 100.0], [0.0, 0.0, 1.0]])
+        count = draw_zones(
+            frame, [zone], map_to_optical, Transform.identity(), camera_matrix,
+            np.zeros(5), vertical_offset=0.0, alpha=0.25,
+        )
+        self.assertEqual(count, 1)
+        exact_orange_bgr = np.array([0, 165, 255], dtype=np.uint8)
+        self.assertTrue(np.any(np.all(frame == exact_orange_bgr, axis=2)))
 
 
 if __name__ == "__main__":

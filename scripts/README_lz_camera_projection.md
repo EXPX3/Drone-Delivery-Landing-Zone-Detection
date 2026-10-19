@@ -27,10 +27,11 @@ Outputs:
 ## Calibration gate
 
 The supplied configuration is intentionally marked `provisional`. The bag has no
-`CameraInfo` message and no recorded `gimbal_link_flu -> camera optical` transform.
+`CameraInfo` message and no recorded `camera_body_flu -> camera_image/camera optical` transform.
 The known 1920x1080 camera matrix is scaled to 1280x720. Inspection of the recorded
-TF shows that camera optical Z is the gimbal frame's negative Y axis; the projector
-checks every rendered pose against a configurable 30-degree sanity limit. The actual
+camera is modeled as a rigid nadir mount: optical forward is `-Z` in the UAV-aligned
+camera body frame, while UAV altitude, roll, pitch, and heading come from `map -> base_link`.
+The projector checks every rendered pose against a configurable 30-degree sanity limit. The actual
 mean and maximum tilt are written to the diagnostics JSON. The exact
 camera lever arm still requires measurement. The configured 45 m vertical datum correction is also an initial
 value for converting Bayern orthometric LiDAR heights to GNSS altitude.
@@ -39,7 +40,7 @@ For a metrically defensible result, measure and update these fields in
 `scripts/config/lz_camera_projection.yaml`:
 
 - Camera matrix and distortion at the recorded resolution and zoom
-- `gimbal_to_optical.translation_m` and `quaternion_xyzw`
+- `mount_to_optical.translation_m` and `quaternion_xyzw`
 - `lz_to_gnss_vertical_offset_m`
 - Set `calibration.status: measured` only after validation
 

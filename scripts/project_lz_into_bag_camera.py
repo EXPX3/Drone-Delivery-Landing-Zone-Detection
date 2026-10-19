@@ -196,7 +196,9 @@ def draw_zones(frame: np.ndarray, zones: list[dict], map_to_optical: Transform,
                vertical_offset: float, alpha: float) -> int:
     overlay = frame.copy()
     count = 0
-    colors = {"safest": (144, 238, 144), "safe": (0, 165, 255), "risky": (0, 0, 255)}
+    rendered: list[tuple[np.ndarray, tuple[int, int], tuple[int, int, int], int]] = []
+    # Exact CSS colors used by rank_landing_zone_risk.py's browser viewer (BGR here).
+    colors = {"safest": (0, 128, 0), "safe": (0, 165, 255), "risky": (0, 0, 255)}
     optical_from_map = map_to_optical.inverse()
     height, width = frame.shape[:2]
     centers_utm = np.asarray(
@@ -230,18 +232,20 @@ def draw_zones(frame: np.ndarray, zones: list[dict], map_to_optical: Transform,
         raster_pixels[:, 0] = np.clip(raster_pixels[:, 0], -4 * width, 5 * width)
         raster_pixels[:, 1] = np.clip(raster_pixels[:, 1], -4 * height, 5 * height)
         polygon = np.rint(raster_pixels).astype(np.int32)
-        color = colors.get(str(zone["category"]), (144, 238, 144))
+        color = (144, 238, 144) if int(zone["rank"]) <= 30 else colors.get(str(zone["category"]), (0, 128, 0))
         cv2.fillPoly(overlay, [polygon], color)
-        cv2.polylines(frame, [polygon], True, color, 3, cv2.LINE_AA)
         center_array = np.rint(center_pixels[index]).astype(int)
         center_array = np.clip(center_array, [0, 0], [width - 1, height - 1])
         center = (int(center_array[0]), int(center_array[1]))
-        cv2.putText(frame, f"LZ {zone['rank']}", center, cv2.FONT_HERSHEY_SIMPLEX,
-                    0.55, (20, 20, 20), 3, cv2.LINE_AA)
-        cv2.putText(frame, f"LZ {zone['rank']}", center, cv2.FONT_HERSHEY_SIMPLEX,
-                    0.55, color, 1, cv2.LINE_AA)
+        rendered.append((polygon, center, color, int(zone["rank"])))
         count += 1
     cv2.addWeighted(overlay, alpha, frame, 1.0 - alpha, 0.0, frame)
+    for polygon, center, color, rank in rendered:
+        cv2.polylines(frame, [polygon], True, color, 3, cv2.LINE_AA)
+        cv2.putText(frame, f"LZ {rank}", center, cv2.FONT_HERSHEY_SIMPLEX,
+                    0.55, (20, 20, 20), 3, cv2.LINE_AA)
+        cv2.putText(frame, f"LZ {rank}", center, cv2.FONT_HERSHEY_SIMPLEX,
+                    0.55, color, 1, cv2.LINE_AA)
     return count
 
 
@@ -257,7 +261,7 @@ def process_images(args: argparse.Namespace, config: dict, tf_data: dict, utm_to
     native_matrix = np.asarray(config["camera"]["matrix"], dtype=np.float64)
     distortion = np.asarray(config["camera"]["distortion"], dtype=np.float64)
     native_size = tuple(config["camera"]["calibration_size"])
-    optical = config_transform(config["camera"]["gimbal_to_optical"])
+    optical = config_transform(config["camera"]["mount_to_optical"])
     chain = config["frames"]["camera_chain"]
     max_gap = float(config["synchronization"]["max_tf_gap_s"])
     output_fps = float(args.output_fps or config["output"]["fps"])
@@ -293,11 +297,11 @@ def process_images(args: argparse.Namespace, config: dict, tf_data: dict, utm_to
                 raise RuntimeError(f"Could not create video {args.output}")
         camera_matrix = scaled_camera_matrix(native_matrix, native_size, (frame.shape[1], frame.shape[0]))
         try:
-            map_to_gimbal = chain_transform(tf_data, chain, timestamp, max_gap)
+            map_to_mount = chain_transform(tf_data, chain, timestamp, max_gap)
         except LookupError:
             skipped_tf += 1
             continue
-        map_to_optical = compose(map_to_gimbal, optical)
+        map_to_optical = compose(map_to_mount, optical)
         optical_axis_map = map_to_optical.matrix[:3, 2]
         nadir_tilt = float(np.rad2deg(np.arccos(np.clip(-optical_axis_map[2], -1.0, 1.0))))
         nadir_tilt_degrees.append(nadir_tilt)
@@ -305,7 +309,7 @@ def process_images(args: argparse.Namespace, config: dict, tf_data: dict, utm_to
                 and nadir_tilt > float(config["camera"]["maximum_nadir_tilt_deg"])):
             raise RuntimeError(
                 f"Camera optical axis is {nadir_tilt:.2f} deg from nadir at t={relative / 1e9:.2f} s; "
-                "check gimbal_to_optical and TF conventions"
+                "check mount_to_optical and TF conventions"
             )
         visible = draw_zones(
             frame, zones, map_to_optical, utm_to_map, camera_matrix,

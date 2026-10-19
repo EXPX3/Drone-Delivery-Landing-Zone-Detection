@@ -10,6 +10,7 @@ Additional workflows:
 
 - [Offline point-cloud, orthophoto, and landing-zone viewer](scripts/README_pointcloud_crop_viewer.md)
 - [Landing-zone projection into recorded camera images](scripts/README_lz_camera_projection.md)
+- [Synchronized bag, UAV trajectory, camera, and LZ browser replay](scripts/lz_bag_replay_viewer/README.md)
 
 ---
 
