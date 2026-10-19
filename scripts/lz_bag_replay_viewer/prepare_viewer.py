@@ -93,24 +93,25 @@ button,select{{background:#27313b;color:#fff;border:1px solid #475569;padding:7p
 <span class="swatch" style="background:#FFA500"></span>Safe
 <span class="swatch" style="background:#FF0000"></span>Risky</div><div id="status">Preparing bag...</div>
 </aside></div><script>
-const graph=document.getElementById('lz-scene'); let lastSeq=-1; let playing=true;
+const graph=document.getElementById('lz-scene'); let lastSeq=-1; let playing=true; let updating=false; let cameraUrl=null;
 function trace(name){{return graph.data.findIndex(item=>item.name===name)}}
 async function control(command,value=''){{await fetch(`/api/control?cmd=${{command}}&value=${{value}}`,{{method:'POST'}})}}
 document.getElementById('play').onclick=async()=>{{playing=!playing;await control(playing?'play':'pause');document.getElementById('play').textContent=playing?'Pause':'Play'}};
 document.getElementById('restart').onclick=()=>control('restart');
 document.getElementById('rate').onchange=e=>control('rate',e.target.value);
-async function update(){{try{{const s=await (await fetch('/api/state',{{cache:'no-store'}})).json();
+async function update(){{if(updating)return;updating=true;try{{const s=await (await fetch('/api/state',{{cache:'no-store'}})).json();
 const imageIds=(s.image_visible_zone_ranks||[]).join(', '),frustumIds=(s.frustum_visible_zone_ranks||[]).join(', ');
 const match=s.projection_sets_match===true?'YES':(s.projection_sets_match===false?'NO':'waiting');
-document.getElementById('status').textContent=`${{s.status}}\nBag time: ${{(s.bag_time_s||0).toFixed(2)}} s\nImage LZs: ${{(s.image_visible_zone_ranks||[]).length}}\nFrustum LZs: ${{(s.frustum_visible_zone_ranks||[]).length}}\nIndependent set match: ${{match}}\nChecked frames: ${{s.checked_frames||0}}\nMismatch frames: ${{s.mismatch_frames||0}}\nImage-only: ${{(s.image_only_zone_ranks||[]).join(', ')||'-'}}\nFrustum-only: ${{(s.frustum_only_zone_ranks||[]).join(', ')||'-'}}\nImage IDs: ${{imageIds}}\nFrustum IDs: ${{frustumIds}}\nFrame: ${{s.frame_number||0}}`;
-if(s.seq!==lastSeq && s.camera_position){{lastSeq=s.seq;document.getElementById('camera').src=`/api/frame.jpg?seq=${{s.seq}}`;
+document.getElementById('status').textContent=`${{s.status}}\nBag time: ${{(s.bag_time_s||0).toFixed(3)}} s\nSynchronized seq: ${{s.seq||0}}\nROS image stamp: ${{s.image_timestamp_ns||'-'}} ns\nImage LZs: ${{(s.image_visible_zone_ranks||[]).length}}\nFrustum LZs: ${{(s.frustum_visible_zone_ranks||[]).length}}\nIndependent set match: ${{match}}\nChecked frames: ${{s.checked_frames||0}}\nMismatch frames: ${{s.mismatch_frames||0}}\nImage-only: ${{(s.image_only_zone_ranks||[]).join(', ')||'-'}}\nFrustum-only: ${{(s.frustum_only_zone_ranks||[]).join(', ')||'-'}}\nImage IDs: ${{imageIds}}\nFrustum IDs: ${{frustumIds}}\nReplay frame: ${{s.frame_number||0}}`;
+if(s.seq!==lastSeq && s.camera_position){{const response=await fetch(`/api/frame.jpg?seq=${{s.seq}}`,{{cache:'no-store'}});if(!response.ok)throw new Error('Exact frame expired');const blob=await response.blob();
 const trajectory=trace('UAV trajectory'),uav=trace('UAV position'),frustum=trace('Camera footprint'),rays=trace('Camera frustum'),visible=trace('Frustum-visible LZ highlight');
-Plotly.restyle(graph,{{x:[s.trajectory.x],y:[s.trajectory.y],z:[s.trajectory.z]}},[trajectory]);
-Plotly.restyle(graph,{{x:[[s.uav_position[0]]],y:[[s.uav_position[1]]],z:[[s.uav_position[2]]]}},[uav]);
-Plotly.restyle(graph,{{x:[s.footprint.x],y:[s.footprint.y],z:[s.footprint.z]}},[frustum]);
-Plotly.restyle(graph,{{x:[s.frustum.x],y:[s.frustum.y],z:[s.frustum.z]}},[rays]);
-Plotly.restyle(graph,{{x:[s.visible_lzs.x],y:[s.visible_lzs.y],z:[s.visible_lzs.z]}},[visible]);}}
-}}catch(error){{document.getElementById('status').textContent='Waiting for replay server...'}}}}
+await Plotly.restyle(graph,{{
+x:[s.trajectory.x,[s.uav_position[0]],s.footprint.x,s.frustum.x,s.visible_lzs.x],
+y:[s.trajectory.y,[s.uav_position[1]],s.footprint.y,s.frustum.y,s.visible_lzs.y],
+z:[s.trajectory.z,[s.uav_position[2]],s.footprint.z,s.frustum.z,s.visible_lzs.z]
+}},[trajectory,uav,frustum,rays,visible]);
+const nextUrl=URL.createObjectURL(blob);document.getElementById('camera').src=nextUrl;if(cameraUrl)URL.revokeObjectURL(cameraUrl);cameraUrl=nextUrl;lastSeq=s.seq;}}
+}}catch(error){{document.getElementById('status').textContent=`Synchronization retry: ${{error.message}}`;}}finally{{updating=false;}}}}
 setInterval(update,150);update();
 </script></body></html>"""
 

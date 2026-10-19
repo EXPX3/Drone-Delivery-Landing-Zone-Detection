@@ -14,6 +14,12 @@ The local replay server reads the ROS 2 bag with its original timestamps and upd
 - a dynamic `Frustum-visible LZ highlight` layer computed independently in 3D;
 - playback time, frame number, and visible-solution count.
 
+Each state update carries a monotonically increasing stream sequence. The browser
+requests the JPEG cached under that exact sequence before updating the 3D traces,
+so it cannot display a newer camera frame with an older frustum. The camera image
+also carries a burned-in replay frame number, stream sequence, bag-relative time,
+and ROS image timestamp for visual synchronization checks.
+
 For every frame, the server performs two independent classifications. The image set
 uses distortion-aware OpenCV pixel projection. The map set transforms each 3D zone
 center into camera coordinates and applies the Brown-Conrady lens model independently

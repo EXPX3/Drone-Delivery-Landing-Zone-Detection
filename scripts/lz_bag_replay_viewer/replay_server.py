@@ -8,6 +8,7 @@ import json
 import sys
 import threading
 import time
+from collections import OrderedDict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -35,6 +36,7 @@ class ReplayState:
         self.restart = threading.Event()
         self.rate = 1.0
         self.jpeg = b""
+        self.jpeg_by_seq: OrderedDict[int, bytes] = OrderedDict()
         self.data = {"seq": 0, "status": "Preparing bag", "trajectory": {"x": [], "y": [], "z": []}}
 
     def snapshot(self) -> dict:
@@ -220,15 +222,30 @@ def replay_loop(args: argparse.Namespace, state: ReplayState) -> None:
                 frame.shape[1], frame.shape[0], ground_z,
             )
             footprint = {axis: [point[index] for point in footprint_points] for index, axis in enumerate(("x", "y", "z"))}
+            frame_number += 1
+            relative_time_s = (timestamp - first_stamp) / 1e9
+            with state.lock:
+                sequence = int(state.data.get("seq", 0)) + 1
+            label = (
+                f"Frame {frame_number:06d} | seq {sequence:06d} | "
+                f"t={relative_time_s:.3f}s | ROS {timestamp} ns"
+            )
+            cv2.rectangle(frame, (0, 0), (frame.shape[1], 42), (0, 0, 0), -1)
+            cv2.putText(frame, label, (14, 29), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.68, (255, 255, 255), 2, cv2.LINE_AA)
             ok, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 82])
             if not ok:
                 continue
-            frame_number += 1
+            jpeg = encoded.tobytes()
             with state.lock:
-                state.jpeg = encoded.tobytes()
+                state.jpeg = jpeg
+                state.jpeg_by_seq[sequence] = jpeg
+                while len(state.jpeg_by_seq) > 64:
+                    state.jpeg_by_seq.popitem(last=False)
                 state.data = {
-                    "seq": state.data.get("seq", 0) + 1, "status": "Playing",
-                    "bag_time_s": (timestamp - first_stamp) / 1e9, "frame_number": frame_number,
+                    "seq": sequence, "status": "Playing",
+                    "bag_time_s": relative_time_s, "frame_number": frame_number,
+                    "image_timestamp_ns": timestamp,
                     "visible_zones": visible,
                     "image_visible_zone_ranks": image_visible_ranks,
                     "frustum_visible_zone_ranks": frustum_ranks,
@@ -262,14 +279,19 @@ def handler_factory(args: argparse.Namespace, state: ReplayState):
             self.end_headers(); self.wfile.write(body)
 
         def do_GET(self) -> None:
-            path = urlparse(self.path).path
+            parsed = urlparse(self.path)
+            path = parsed.path
             if path == "/":
                 self.send_bytes(args.viewer.read_bytes(), "text/html; charset=utf-8")
             elif path == "/api/state":
                 self.send_bytes(json.dumps(state.snapshot()).encode(), "application/json")
             elif path == "/api/frame.jpg":
+                requested = parse_qs(parsed.query).get("seq", [None])[0]
                 with state.lock:
-                    jpeg = state.jpeg
+                    jpeg = state.jpeg if requested is None else state.jpeg_by_seq.get(int(requested))
+                if jpeg is None:
+                    self.send_error(409, "Requested replay frame is no longer cached")
+                    return
                 self.send_bytes(jpeg, "image/jpeg")
             else:
                 self.send_error(404)
