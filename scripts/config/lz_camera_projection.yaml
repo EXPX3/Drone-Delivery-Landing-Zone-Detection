@@ -1,0 +1,46 @@
+calibration:
+  # Change to measured only after validating all values below against calibration data.
+  status: provisional
+  notes:
+    - Intrinsics came from the CargoPack camera code at 1920x1080.
+    - Recorded 1280x720 images are treated as full-frame 2/3 resizes.
+    - Gimbal-to-optical translation is not present in the bag and is currently zero.
+    - Vertical datum offset is an initial Munich geoid-scale estimate and must be surveyed.
+
+topics:
+  image: /GremsyVIO/image/cpu
+  gps: /mavros/global_position/global
+  tf: /tf
+  tf_static: /tf_static
+
+frames:
+  map: map
+  base: base_link
+  camera_chain: [map, base_link, altax_center_flu, camera_body_flu, gimbal_link_flu]
+
+camera:
+  calibration_size: [1920, 1080]
+  matrix:
+    - [1328.70412, 0.0, 945.511916]
+    - [0.0, 1440.59216, 575.929244]
+    - [0.0, 0.0, 1.0]
+  distortion: [0.05724215, -0.23188819, -0.00854506, -0.00473153, 0.06875864]
+  # Standard ROS FLU to optical convention: optical x=right, y=down, z=forward.
+  # This transform maps camera-optical points into gimbal_link_flu.
+  gimbal_to_optical:
+    translation_m: [0.0, 0.0, 0.0]
+    quaternion_xyzw: [0.5, -0.5, 0.5, -0.5]
+
+registration:
+  minimum_trajectory_baseline_m: 10.0
+  maximum_horizontal_rmse_m: 5.0
+  # Added to Bayern LiDAR/DHHN heights before mapping through GNSS altitude.
+  lz_to_gnss_vertical_offset_m: 45.0
+
+synchronization:
+  max_tf_gap_s: 0.25
+
+output:
+  fps: 15.0
+  fill_alpha: 0.35
+

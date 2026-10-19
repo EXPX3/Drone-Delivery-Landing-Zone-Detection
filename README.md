@@ -6,6 +6,11 @@ This repository focuses on two core components:
 - 🧠 **Drone-Delivery-Landing-Zone-Detection (DLZD) Algorithms**
 - 📊 **Proposed Benchmarking Strategy** for evaluating those algorithms
 
+Additional workflows:
+
+- [Offline point-cloud, orthophoto, and landing-zone viewer](scripts/README_pointcloud_crop_viewer.md)
+- [Landing-zone projection into recorded camera images](scripts/README_lz_camera_projection.md)
+
 ---
 
 ## 📁 Benchmarking Framework Configuration
