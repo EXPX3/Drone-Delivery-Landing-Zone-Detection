@@ -20,6 +20,7 @@ from lz_camera_projection import (  # noqa: E402
     zone_ring,
 )
 from project_lz_into_bag_camera import draw_zones  # noqa: E402
+from lz_bag_replay_viewer.replay_server import frustum_visible_ranks  # noqa: E402
 
 
 class ProjectionGeometryTests(unittest.TestCase):
@@ -84,13 +85,31 @@ class ProjectionGeometryTests(unittest.TestCase):
         }
         map_to_optical = Transform(np.array([0.0, 0.0, 10.0]), np.array([1.0, 0.0, 0.0, 0.0]))
         camera_matrix = np.array([[100.0, 0.0, 100.0], [0.0, 100.0, 100.0], [0.0, 0.0, 1.0]])
+        visible_ranks = []
         count = draw_zones(
             frame, [zone], map_to_optical, Transform.identity(), camera_matrix,
             np.zeros(5), vertical_offset=0.0, alpha=0.25,
+            visible_ranks_out=visible_ranks,
         )
         self.assertEqual(count, 1)
+        self.assertEqual(visible_ranks, [100])
         exact_orange_bgr = np.array([0, 165, 255], dtype=np.uint8)
         self.assertTrue(np.any(np.all(frame == exact_orange_bgr, axis=2)))
+
+    def test_frustum_classifier_is_independent_of_image_renderer(self):
+        zones = [
+            {"rank": 1, "x": 0.0, "y": 0.0, "z": 0.0, "radius": 2.0,
+             "normal_x": 0.0, "normal_y": 0.0, "normal_z": 1.0},
+            {"rank": 2, "x": 30.0, "y": 0.0, "z": 0.0, "radius": 2.0,
+             "normal_x": 0.0, "normal_y": 0.0, "normal_z": 1.0},
+        ]
+        map_to_optical = Transform(np.array([0.0, 0.0, 10.0]), np.array([1.0, 0.0, 0.0, 0.0]))
+        camera_matrix = np.array([[100.0, 0.0, 100.0], [0.0, 100.0, 100.0], [0.0, 0.0, 1.0]])
+        ranks = frustum_visible_ranks(
+            zones, map_to_optical, Transform.identity(), camera_matrix, np.zeros(5),
+            width=200, height=200, vertical_offset=0.0,
+        )
+        self.assertEqual(ranks, [1])
 
 
 if __name__ == "__main__":

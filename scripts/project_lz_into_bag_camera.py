@@ -193,7 +193,8 @@ def config_transform(item: dict) -> Transform:
 
 def draw_zones(frame: np.ndarray, zones: list[dict], map_to_optical: Transform,
                utm_to_map: Transform, camera_matrix: np.ndarray, distortion: np.ndarray,
-               vertical_offset: float, alpha: float) -> int:
+               vertical_offset: float, alpha: float,
+               visible_ranks_out: list[int] | None = None) -> int:
     overlay = frame.copy()
     count = 0
     rendered: list[tuple[np.ndarray, tuple[int, int], tuple[int, int, int], int]] = []
@@ -239,6 +240,8 @@ def draw_zones(frame: np.ndarray, zones: list[dict], map_to_optical: Transform,
         center = (int(center_array[0]), int(center_array[1]))
         rendered.append((polygon, center, color, int(zone["rank"])))
         count += 1
+        if visible_ranks_out is not None:
+            visible_ranks_out.append(int(zone["rank"]))
     cv2.addWeighted(overlay, alpha, frame, 1.0 - alpha, 0.0, frame)
     for polygon, center, color, rank in rendered:
         cv2.polylines(frame, [polygon], True, color, 3, cv2.LINE_AA)

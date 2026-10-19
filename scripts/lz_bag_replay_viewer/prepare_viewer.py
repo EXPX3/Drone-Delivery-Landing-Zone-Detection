@@ -78,7 +78,7 @@ html,body{{height:100%;margin:0;background:#101418;color:#edf2f7;font:14px Arial
 #side{{border-left:1px solid #39424c;background:#171d23;display:flex;flex-direction:column;min-width:0}}
 #side h1{{font-size:17px;margin:16px 16px 10px;letter-spacing:0}}
 #camera{{width:100%;aspect-ratio:16/9;object-fit:contain;background:#050607}}
-#status{{padding:12px 16px;line-height:1.55;color:#cbd5e1;white-space:pre-line}}
+#status{{padding:12px 16px;line-height:1.55;color:#cbd5e1;white-space:pre-line;overflow:auto}}
 #controls{{display:flex;gap:8px;padding:0 16px 14px;align-items:center}}
 button,select{{background:#27313b;color:#fff;border:1px solid #475569;padding:7px 10px;border-radius:4px}}
 .legend{{padding:0 16px;color:#aab6c3;font-size:12px}}
@@ -100,13 +100,16 @@ document.getElementById('play').onclick=async()=>{{playing=!playing;await contro
 document.getElementById('restart').onclick=()=>control('restart');
 document.getElementById('rate').onchange=e=>control('rate',e.target.value);
 async function update(){{try{{const s=await (await fetch('/api/state',{{cache:'no-store'}})).json();
-document.getElementById('status').textContent=`${{s.status}}\nBag time: ${{(s.bag_time_s||0).toFixed(2)}} s\nVisible LZs: ${{s.visible_zones||0}}\nFrame: ${{s.frame_number||0}}`;
+const imageIds=(s.image_visible_zone_ranks||[]).join(', '),frustumIds=(s.frustum_visible_zone_ranks||[]).join(', ');
+const match=s.projection_sets_match===true?'YES':(s.projection_sets_match===false?'NO':'waiting');
+document.getElementById('status').textContent=`${{s.status}}\nBag time: ${{(s.bag_time_s||0).toFixed(2)}} s\nImage LZs: ${{(s.image_visible_zone_ranks||[]).length}}\nFrustum LZs: ${{(s.frustum_visible_zone_ranks||[]).length}}\nIndependent set match: ${{match}}\nChecked frames: ${{s.checked_frames||0}}\nMismatch frames: ${{s.mismatch_frames||0}}\nImage-only: ${{(s.image_only_zone_ranks||[]).join(', ')||'-'}}\nFrustum-only: ${{(s.frustum_only_zone_ranks||[]).join(', ')||'-'}}\nImage IDs: ${{imageIds}}\nFrustum IDs: ${{frustumIds}}\nFrame: ${{s.frame_number||0}}`;
 if(s.seq!==lastSeq && s.camera_position){{lastSeq=s.seq;document.getElementById('camera').src=`/api/frame.jpg?seq=${{s.seq}}`;
-const trajectory=trace('UAV trajectory'),uav=trace('UAV position'),frustum=trace('Camera footprint'),rays=trace('Camera frustum');
+const trajectory=trace('UAV trajectory'),uav=trace('UAV position'),frustum=trace('Camera footprint'),rays=trace('Camera frustum'),visible=trace('Frustum-visible LZ highlight');
 Plotly.restyle(graph,{{x:[s.trajectory.x],y:[s.trajectory.y],z:[s.trajectory.z]}},[trajectory]);
 Plotly.restyle(graph,{{x:[[s.uav_position[0]]],y:[[s.uav_position[1]]],z:[[s.uav_position[2]]]}},[uav]);
 Plotly.restyle(graph,{{x:[s.footprint.x],y:[s.footprint.y],z:[s.footprint.z]}},[frustum]);
-Plotly.restyle(graph,{{x:[s.frustum.x],y:[s.frustum.y],z:[s.frustum.z]}},[rays]);}}
+Plotly.restyle(graph,{{x:[s.frustum.x],y:[s.frustum.y],z:[s.frustum.z]}},[rays]);
+Plotly.restyle(graph,{{x:[s.visible_lzs.x],y:[s.visible_lzs.y],z:[s.visible_lzs.z]}},[visible]);}}
 }}catch(error){{document.getElementById('status').textContent='Waiting for replay server...'}}}}
 setInterval(update,150);update();
 </script></body></html>"""
@@ -145,6 +148,10 @@ def main() -> int:
     figure.add_trace(go.Scatter3d(x=[], y=[], z=[], mode="markers", name="UAV position", marker={"color": "#ffffff", "size": 6, "symbol": "diamond"}))
     figure.add_trace(go.Scatter3d(x=[], y=[], z=[], mode="lines", name="Camera footprint", line={"color": "#00e5ff", "width": 7}))
     figure.add_trace(go.Scatter3d(x=[], y=[], z=[], mode="lines", name="Camera frustum", line={"color": "#80deea", "width": 3}))
+    figure.add_trace(go.Scatter3d(
+        x=[], y=[], z=[], mode="lines", name="Frustum-visible LZ highlight",
+        line={"color": "#FFB6C1", "width": 10}, hoverinfo="skip",
+    ))
     figure.update_layout(
         scene={"xaxis_title": "UTM Easting", "yaxis_title": "UTM Northing", "zaxis_title": "Elevation", "aspectmode": "data"},
         margin={"l": 0, "r": 0, "t": 0, "b": 0}, paper_bgcolor="#101418", legend={"bgcolor": "rgba(20,25,30,.8)"},

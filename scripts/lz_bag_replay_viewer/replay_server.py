@@ -19,7 +19,9 @@ import yaml
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
 
-from lz_camera_projection import Transform, compose, load_landing_zones, scaled_camera_matrix, transform_points  # noqa: E402
+from lz_camera_projection import (  # noqa: E402
+    Transform, compose, load_landing_zones, scaled_camera_matrix, transform_points, zone_ring,
+)
 from project_lz_into_bag_camera import (  # noqa: E402
     chain_transform, config_transform, decode_image, draw_zones, fit_utm_to_map,
     open_reader, read_pose_and_gps, require_ros, stamp_ns,
@@ -70,13 +72,58 @@ def camera_footprint(ortho_to_optical: Transform, camera_matrix: np.ndarray, dis
     return closed, {"x": frustum_x, "y": frustum_y, "z": frustum_z}
 
 
+def frustum_visible_ranks(zones: list[dict], map_to_optical: Transform, utm_to_map: Transform,
+                          camera_matrix: np.ndarray, distortion: np.ndarray,
+                          width: int, height: int, vertical_offset: float) -> list[int]:
+    """Independently classify renderable zone footprints against the 3D frustum."""
+
+    coefficients = np.zeros(5, dtype=np.float64)
+    supplied = np.asarray(distortion, dtype=np.float64).reshape(-1)
+    coefficients[:min(5, len(supplied))] = supplied[:5]
+    k1, k2, p1, p2, k3 = coefficients
+    centers_utm = np.asarray(
+        [[float(zone["x"]), float(zone["y"]), float(zone["z"]) + vertical_offset] for zone in zones],
+        dtype=np.float64,
+    )
+    centers_map = transform_points(utm_to_map, centers_utm)
+    optical_from_map = map_to_optical.inverse()
+    centers_optical = transform_points(optical_from_map, centers_map)
+    ranks = []
+    for zone, center in zip(zones, centers_optical):
+        if center[2] <= 0.1:
+            continue
+        # Independent Brown-Conrady projection for the center. This deliberately
+        # does not call draw_zones/project_optical_points or consume their IDs.
+        x = float(center[0] / center[2])
+        y = float(center[1] / center[2])
+        r2 = x * x + y * y
+        radial = 1.0 + k1 * r2 + k2 * r2 * r2 + k3 * r2 * r2 * r2
+        distorted_x = x * radial + 2.0 * p1 * x * y + p2 * (r2 + 2.0 * x * x)
+        distorted_y = y * radial + p1 * (r2 + 2.0 * y * y) + 2.0 * p2 * x * y
+        pixel = camera_matrix @ np.array([distorted_x, distorted_y, 1.0])
+        if not (0.0 <= pixel[0] < width and 0.0 <= pixel[1] < height):
+            continue
+        ring_utm = zone_ring(zone, vertical_offset_m=vertical_offset, samples=72)
+        ring_map = transform_points(utm_to_map, ring_utm)
+        ring_optical = transform_points(optical_from_map, ring_map)
+        # Match the renderer's declared partial-footprint policy without sharing
+        # its projected pixels or selected IDs. This permits a circle crossing
+        # the near plane only when at least 80% remains geometrically valid.
+        if np.count_nonzero(ring_optical[:, 2] > 0.1) < len(ring_optical) * 0.8:
+            continue
+        ranks.append(int(zone["rank"]))
+    return sorted(ranks)
+
+
 def replay_loop(args: argparse.Namespace, state: ReplayState) -> None:
     with args.projection_config.open(encoding="utf-8") as handle:
         config = yaml.safe_load(handle)
     zones = load_landing_zones(args.zones, None, 0)
+    zones_by_rank = {int(zone["rank"]): zone for zone in zones}
     tf_data, gps = read_pose_and_gps(args.bag, config)
     utm_to_map, registration = fit_utm_to_map(tf_data, gps, config)
-    map_to_ortho = orthometric_from_map(utm_to_map, float(config["registration"]["lz_to_gnss_vertical_offset_m"]))
+    vertical_offset = float(config["registration"]["lz_to_gnss_vertical_offset_m"])
+    map_to_ortho = orthometric_from_map(utm_to_map, vertical_offset)
     ground_z = float(np.median([float(zone["z"]) for zone in zones]))
     _, deserialize_message, get_message = require_ros()
     while True:
@@ -88,6 +135,9 @@ def replay_loop(args: argparse.Namespace, state: ReplayState) -> None:
         wall_start = time.monotonic()
         trajectory = {"x": [], "y": [], "z": []}
         frame_number = 0
+        checked_frames = 0
+        mismatch_frames = 0
+        mismatch_examples: list[dict[str, object]] = []
         with state.lock:
             state.data.update({"status": "Playing", "registration": registration, "trajectory": trajectory})
         while reader.has_next():
@@ -116,9 +166,40 @@ def replay_loop(args: argparse.Namespace, state: ReplayState) -> None:
             map_to_mount = chain_transform(tf_data, config["frames"]["camera_chain"], timestamp,
                                             float(config["synchronization"]["max_tf_gap_s"]))
             map_to_optical = compose(map_to_mount, config_transform(config["camera"]["mount_to_optical"]))
-            visible = draw_zones(frame, zones, map_to_optical, utm_to_map, camera_matrix,
-                                 np.asarray(config["camera"]["distortion"]),
-                                 float(config["registration"]["lz_to_gnss_vertical_offset_m"]), 0.25)
+            image_visible_ranks: list[int] = []
+            visible = draw_zones(
+                frame, zones, map_to_optical, utm_to_map, camera_matrix,
+                np.asarray(config["camera"]["distortion"]),
+                vertical_offset, 0.25,
+                visible_ranks_out=image_visible_ranks,
+            )
+            image_visible_ranks = sorted(image_visible_ranks)
+            frustum_ranks = frustum_visible_ranks(
+                zones, map_to_optical, utm_to_map, camera_matrix,
+                np.asarray(config["camera"]["distortion"]), frame.shape[1], frame.shape[0],
+                vertical_offset,
+            )
+            image_only = sorted(set(image_visible_ranks) - set(frustum_ranks))
+            frustum_only = sorted(set(frustum_ranks) - set(image_visible_ranks))
+            sets_match = not image_only and not frustum_only and visible == len(image_visible_ranks)
+            checked_frames += 1
+            if not sets_match:
+                mismatch_frames += 1
+                if len(mismatch_examples) < 10:
+                    mismatch_examples.append({
+                        "bag_time_s": (timestamp - first_stamp) / 1e9,
+                        "image_only": image_only,
+                        "frustum_only": frustum_only,
+                    })
+            visible_zones = [zones_by_rank[rank] for rank in frustum_ranks]
+            visible_lzs: dict[str, list[float | None] | list[int]] = {
+                "x": [], "y": [], "z": [], "rank": frustum_ranks,
+            }
+            for zone in visible_zones:
+                ring = zone_ring(zone, vertical_offset_m=vertical_offset, samples=48)
+                ring = np.vstack((ring, ring[0]))
+                for column, axis in enumerate(("x", "y", "z")):
+                    visible_lzs[axis].extend(ring[:, column].tolist() + [None])
             ortho_to_optical = compose(map_to_ortho, map_to_optical)
             map_to_base = chain_transform(tf_data, [config["frames"]["map"], config["frames"]["base"]], timestamp,
                                           float(config["synchronization"]["max_tf_gap_s"]))
@@ -139,7 +220,16 @@ def replay_loop(args: argparse.Namespace, state: ReplayState) -> None:
                 state.data = {
                     "seq": state.data.get("seq", 0) + 1, "status": "Playing",
                     "bag_time_s": (timestamp - first_stamp) / 1e9, "frame_number": frame_number,
-                    "visible_zones": visible, "camera_position": ortho_to_optical.translation.tolist(),
+                    "visible_zones": visible,
+                    "image_visible_zone_ranks": image_visible_ranks,
+                    "frustum_visible_zone_ranks": frustum_ranks,
+                    "image_only_zone_ranks": image_only,
+                    "frustum_only_zone_ranks": frustum_only,
+                    "checked_frames": checked_frames,
+                    "mismatch_frames": mismatch_frames,
+                    "mismatch_examples": mismatch_examples.copy(),
+                    "projection_sets_match": sets_match, "visible_lzs": visible_lzs,
+                    "camera_position": ortho_to_optical.translation.tolist(),
                     "uav_position": uav.tolist(),
                     "trajectory": {axis: values.copy() for axis, values in trajectory.items()},
                     "footprint": footprint, "frustum": frustum,

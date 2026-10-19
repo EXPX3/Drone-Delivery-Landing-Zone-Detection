@@ -11,7 +11,25 @@ The local replay server reads the ROS 2 bag with its original timestamps and upd
 - the UAV's accumulated 3D trajectory and current position;
 - the camera frustum and its image-boundary footprint on the point-cloud ground plane;
 - the current camera image, including the same in-frame LZ projection;
+- a dynamic `Frustum-visible LZ highlight` layer computed independently in 3D;
 - playback time, frame number, and visible-solution count.
+
+For every frame, the server performs two independent classifications. The image set
+uses distortion-aware OpenCV pixel projection. The map set transforms each 3D zone
+center into camera coordinates and applies the Brown-Conrady lens model independently
+to test the exact distorted image boundary. Both calculations use the same declared
+partial-footprint policy: the center must be in-frame and at least 80 percent of the
+metric landing-zone circle must remain in front of the camera. Neither result is
+changed to agree with the other. The sidebar reports both ID sets,
+`Independent set match: YES/NO`, and any
+image-only or frustum-only candidates. It also accumulates checked-frame and
+mismatch-frame counts over the complete replay and retains the first ten mismatch
+examples in the state API.
+
+The independently selected 3D landing-zone footprints are redrawn as thick light
+pink (`#FFB6C1`) circles. The landing zones themselves do not move; the pink subset
+changes as the camera frustum moves across the static point cloud. Image overlays
+retain their original risk colors so the two calculations remain visually distinct.
 
 The exact original viewer colors are preserved: `green` (`#008000`) for safest,
 `orange` (`#FFA500`) for safe, `red` (`#FF0000`) for risky, and `lightgreen`
