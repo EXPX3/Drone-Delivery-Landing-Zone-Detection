@@ -4,6 +4,8 @@ This viewer is the efficient native ROS 2 alternative to the synchronized browse
 viewer. It publishes a downsampled static `PointCloud2`, batched landing-zone
 `MarkerArray` messages, live camera/frustum markers, and the annotated camera image.
 All live output for a replay step uses the same ROS image timestamp.
+RViz renders the 3D scene, while the native ROS `image_view` process displays the
+camera topic in a separate lightweight window.
 
 Launch with the existing `cargopack:2026` image:
 
@@ -24,8 +26,8 @@ Topics:
 - `/ddlzd/pointcloud`: static local-origin point cloud;
 - `/ddlzd/landing_zones`: static risk-colored solutions;
 - `/ddlzd/replay_markers`: UAV, trajectory, frustum, footprint, and pink visible zones;
-- `/ddlzd/camera_overlay/compressed`: synchronized annotated JPEG camera image
-  consumed through RViz's `compressed` image transport.
+- `/ddlzd/camera_overlay`: synchronized annotated camera image, resized to
+  `640x360` by default to keep DDS and rendering overhead low.
 
 The point cloud is limited to 250,000 deterministic samples by default and shifted
 to a local XY origin to avoid float32 precision loss in RViz. The camera image carries

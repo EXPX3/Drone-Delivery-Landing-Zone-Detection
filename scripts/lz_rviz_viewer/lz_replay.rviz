@@ -7,17 +7,21 @@ Panels:
     Name: Time
 Visualization Manager:
   Class: ""
+  Enabled: true
   Global Options:
     Background Color: 24; 29; 34
     Fixed Frame: lz_world
     Frame Rate: 30
   Displays:
     - Class: rviz_default_plugins/Grid
+      Enabled: true
       Name: Ground Grid
       Plane: XY
       Cell Size: 5
       Color: 90; 100; 110
+      Value: true
     - Class: rviz_default_plugins/PointCloud2
+      Enabled: true
       Name: Point Cloud
       Topic:
         Value: /ddlzd/pointcloud
@@ -29,23 +33,22 @@ Visualization Manager:
       Min Color: 40; 90; 180
       Max Color: 230; 210; 80
       Autocompute Intensity Bounds: true
+      Value: true
     - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
       Name: Landing Zones
       Topic:
         Value: /ddlzd/landing_zones
       Queue Size: 1
+      Value: true
     - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
       Name: Live Camera Geometry
       Topic:
         Value: /ddlzd/replay_markers
       Queue Size: 1
-    - Class: rviz_default_plugins/Image
-      Name: Camera Image
-      Image Topic:
-        Value: /ddlzd/camera_overlay
-      Queue Size: 1
-      Transport Hint: compressed
-      Normalize Range: true
+      Value: true
+  Value: true
   Views:
     Current:
       Class: rviz_default_plugins/Orbit

@@ -17,7 +17,7 @@ from geometry_msgs.msg import Point
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
-from sensor_msgs.msg import CompressedImage, PointCloud2, PointField
+from sensor_msgs.msg import Image, PointCloud2, PointField
 from std_msgs.msg import Header
 from visualization_msgs.msg import Marker, MarkerArray
 
@@ -129,7 +129,7 @@ class LandingZoneRvizReplay(Node):
         self.cloud_pub = self.create_publisher(PointCloud2, "/ddlzd/pointcloud", durable)
         self.static_pub = self.create_publisher(MarkerArray, "/ddlzd/landing_zones", durable)
         self.dynamic_pub = self.create_publisher(MarkerArray, "/ddlzd/replay_markers", live)
-        self.image_pub = self.create_publisher(CompressedImage, "/ddlzd/camera_overlay/compressed", live)
+        self.image_pub = self.create_publisher(Image, "/ddlzd/camera_overlay", live)
         self.cloud_pub.publish(point_cloud_message(cloud, self.origin))
         self.static_pub.publish(self.static_zone_markers())
         self.get_logger().info(f"Published {len(cloud)} cloud points and {len(self.zones)} landing zones")
@@ -180,14 +180,17 @@ class LandingZoneRvizReplay(Node):
         return MarkerArray(markers=[clear, pink, trail, aircraft, outline, rays])
 
     def publish_image(self, frame: np.ndarray, timestamp_ns: int) -> None:
-        ok, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 82])
-        if not ok:
-            raise RuntimeError("Could not JPEG-encode camera frame")
-        message = CompressedImage()
+        if self.args.image_width > 0 and frame.shape[1] != self.args.image_width:
+            height = int(round(frame.shape[0] * self.args.image_width / frame.shape[1]))
+            frame = cv2.resize(frame, (self.args.image_width, height), interpolation=cv2.INTER_AREA)
+        message = Image()
         message.header.frame_id = "camera_optical"
         ros_stamp(message, timestamp_ns)
-        message.format = "jpeg"
-        message.data = encoded.tobytes()
+        message.height, message.width = frame.shape[:2]
+        message.encoding = "bgr8"
+        message.is_bigendian = False
+        message.step = message.width * 3
+        message.data = np.ascontiguousarray(frame).tobytes()
         self.image_pub.publish(message)
 
     def replay(self) -> None:
@@ -285,6 +288,7 @@ def main() -> int:
     parser.add_argument("--max-points", type=int, default=250000)
     parser.add_argument("--fps", type=float, default=12.0)
     parser.add_argument("--rate", type=float, default=1.0)
+    parser.add_argument("--image-width", type=int, default=640)
     args = parser.parse_args()
     rclpy.init()
     node = LandingZoneRvizReplay(args)
