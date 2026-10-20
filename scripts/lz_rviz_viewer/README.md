@@ -1,7 +1,7 @@
 # Fast RViz Landing-Zone Replay
 
 For the complete current-state runbook, validation results, and troubleshooting, see
-[`../DEMO_CURRENT_STATE.md`](../DEMO_CURRENT_STATE.md).
+[`../DEMO_rviz_3dlz_to_lz_in_image.md`](../DEMO_rviz_3dlz_to_lz_in_image.md).
 
 This viewer is the efficient native ROS 2 alternative to the synchronized browser
 viewer. It publishes a downsampled static `PointCloud2`, batched landing-zone
