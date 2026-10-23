@@ -1,0 +1,23 @@
+topics:
+  points: /velodyne_points
+  imu: /mavros/imu/data_raw
+  gnss: /mavros/global_position/global
+  odometry: /mavros/local_position/odom
+  tf: /tf
+  tf_static: /tf_static
+
+frames:
+  trajectory_parent: map
+  body: base_link
+  lidar_chain: [base_link, altax_center_flu, velodyne]
+
+mapping:
+  point_stride: 4
+  minimum_range_m: 1.0
+  maximum_range_m: 80.0
+  maximum_pose_gap_s: 0.10
+
+validation:
+  # Never consumed by bag-only mapping. Used only by the separate evaluator.
+  bayern_ground_pcd: pcds/696_5328_cropped_ground_only.pcd
+  bayern_full_pcd: pcds/696_5328_cropped_by_bayernatlas_20260812084517.pcd
