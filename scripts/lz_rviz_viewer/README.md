@@ -54,3 +54,7 @@ Standalone mode uses local `(0, 0)` as the 100 m ROI center, derives the RViz
 floating-point origin from the cloud, and deterministically displays at most one
 million points. Calling the launcher without an argument retains the original
 four-layer Bayern-assisted audit view.
+
+The primary cloud uses a fixed Z-axis rainbow scale from `-0.5 m` to `2.2 m`
+relative to the displayed cloud origin. This gives near-ground boxes and human-height
+returns more color separation than automatic scaling over trees and other tall data.

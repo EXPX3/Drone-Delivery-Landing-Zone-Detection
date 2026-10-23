@@ -26,8 +26,8 @@ Visualization Manager:
       Value: true
     - Alpha: 0.9
       Autocompute Value Bounds:
-        Max Value: 3.0
-        Min Value: -0.3
+        Max Value: 2.2
+        Min Value: -0.5
         Value: false
       Axis: Z
       Class: rviz_default_plugins/PointCloud2
@@ -37,10 +37,10 @@ Visualization Manager:
       Invert Rainbow: false
       Max Color: 245; 55; 45
       Min Color: 35; 110; 235
-      Name: Direct Corrected LiDAR Points
+      Name: Height Gradient LiDAR Points
       Position Transformer: XYZ
       Selectable: true
-      Size (Pixels): 3
+      Size (Pixels): 4
       Style: Points
       Topic:
         Depth: 1
