@@ -48,6 +48,12 @@ docker logs -f ddlzd-lz-rviz
 - `Landing Zones`: current active categories and blocked-zone crosses.
 - `Live Camera Geometry`: trajectory, UAV, frustum, footprint, and camera-visible LZs.
 
+The UAV sphere and trajectory use GNSS interpolated at the exact camera-image
+timestamp. The camera/frustum use the recorded TF chain. A magenta residual line
+connects the GNSS UAV position to the TF-derived base position, and the image status
+reports the current horizontal `GNSS/TF` residual. The frame number and ROS timestamp
+shown above the UAV are identical to those burned into the camera image.
+
 Voxel color follows altitude: blue at low elevations through cyan and yellow to red
 at high elevations. Landing-zone rings have a 0.65 m RViz-only visual lift so voxel
 faces do not hide them. Detection and camera projection retain the actual surface Z.
@@ -83,6 +89,7 @@ confirmation_hits: 3
 maximum_lidar_range_m: 80.0
 point_stride: 2
 publish_hz: 2.0
+zone_publish_hz: 1.0
 gps_wind_margin_m: 2.0
 obstacle_min_height_m: 0.35
 vertical_clearance_m: 20.0
@@ -96,7 +103,20 @@ zone_visual_lift_m: 0.65
   -m unittest discover -s scripts/tests -v
 ```
 
-Expected result: 14 tests pass.
+Expected result: 15 tests pass.
+
+## Synchronization Evidence
+
+Both `/ddlzd/camera_overlay` and every marker in `/ddlzd/replay_markers` carry the
+same source image timestamp. A 30-pair runtime check found no unmatched samples. With
+the image published before its marker bundle, image-minus-marker arrival skew was
+`-2.8` to `+10.4 ms` with a `-1.6 ms` median. Rendering in RViz and `image_view`
+remains asynchronous, but neither stream represents a different bag frame.
+
+In the same runtime check, independently interpolated GNSS and TF-derived UAV
+horizontal positions differed by approximately 0.0051 m. A larger apparent offset
+between image content and mapped objects therefore belongs to camera-to-ground
+calibration, not UAV georegistration. The camera calibration remains provisional.
 
 ## Stop
 

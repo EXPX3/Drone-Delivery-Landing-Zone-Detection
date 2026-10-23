@@ -9,6 +9,25 @@ from dataclasses import dataclass, field
 import numpy as np
 
 
+def interpolate_gps(gps: list[tuple[int, float, float, float]], timestamp_ns: int,
+                    vertical_offset: float, times: np.ndarray | None = None) -> np.ndarray:
+    """Interpolate UTM/GNSS position at an image timestamp in orthometric Z."""
+    if times is None:
+        times = np.fromiter((item[0] for item in gps), dtype=np.int64)
+    right = int(np.searchsorted(times, timestamp_ns, side="left"))
+    if right <= 0:
+        item = gps[0]
+        return np.array([item[1], item[2], item[3] - vertical_offset])
+    if right >= len(gps):
+        item = gps[-1]
+        return np.array([item[1], item[2], item[3] - vertical_offset])
+    first, second = gps[right - 1], gps[right]
+    fraction = (timestamp_ns - first[0]) / max(1, second[0] - first[0])
+    first_position = np.array([first[1], first[2], first[3] - vertical_offset])
+    second_position = np.array([second[1], second[2], second[3] - vertical_offset])
+    return first_position * (1.0 - fraction) + second_position * fraction
+
+
 def pointcloud2_xyz(message: object) -> np.ndarray:
     """Decode x/y/z float32 fields from an organized or flat PointCloud2."""
     offsets = {item.name: int(item.offset) for item in message.fields}

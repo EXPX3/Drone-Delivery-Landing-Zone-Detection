@@ -11,7 +11,7 @@ import numpy as np
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
 
-from lz_rviz_viewer.dynamic_occupancy import DynamicOccupancyMap, pointcloud2_xyz
+from lz_rviz_viewer.dynamic_occupancy import DynamicOccupancyMap, interpolate_gps, pointcloud2_xyz
 
 
 def zone(rank=1, x=0.0, y=0.0, z=10.0, radius=2.5, category="safest"):
@@ -19,6 +19,13 @@ def zone(rank=1, x=0.0, y=0.0, z=10.0, radius=2.5, category="safest"):
 
 
 class DynamicOccupancyTests(unittest.TestCase):
+    def test_interpolates_geographic_uav_at_image_timestamp(self):
+        gps = [(1_000_000_000, 10.0, 20.0, 100.0),
+               (3_000_000_000, 14.0, 24.0, 104.0)]
+        np.testing.assert_allclose(
+            interpolate_gps(gps, 2_000_000_000, 45.0), [12.0, 22.0, 57.0]
+        )
+
     def test_decodes_strided_pointcloud2_and_discards_nan(self):
         fields = [
             SimpleNamespace(name="x", offset=0),

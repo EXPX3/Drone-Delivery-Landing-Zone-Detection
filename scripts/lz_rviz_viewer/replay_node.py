@@ -28,7 +28,9 @@ from lz_bag_replay_viewer.replay_server import (  # noqa: E402
     camera_footprint, displayed_zone_ring, orthometric_from_map,
 )
 from lz_camera_projection import compose, load_landing_zones, scaled_camera_matrix, transform_points  # noqa: E402
-from lz_rviz_viewer.dynamic_occupancy import DynamicOccupancyMap, pointcloud2_xyz  # noqa: E402
+from lz_rviz_viewer.dynamic_occupancy import (  # noqa: E402
+    DynamicOccupancyMap, interpolate_gps, pointcloud2_xyz,
+)
 from project_lz_into_bag_camera import (  # noqa: E402
     chain_transform, config_transform, decode_image, draw_zones, fit_utm_to_map,
     open_reader, read_pose_and_gps, require_ros, stamp_ns,
@@ -221,7 +223,8 @@ class LandingZoneRvizReplay(Node):
         return MarkerArray(markers=[item])
 
     def dynamic_markers(self, timestamp_ns: int, visible_zones: list[dict], trajectory: list[np.ndarray],
-                        uav: np.ndarray, camera: np.ndarray, footprint: list[list[float]]) -> MarkerArray:
+                        uav: np.ndarray, camera: np.ndarray, footprint: list[list[float]],
+                        frame_number: int, tf_uav: np.ndarray) -> MarkerArray:
         clear = Marker()
         clear.header.frame_id = FRAME_ID
         ros_stamp(clear, timestamp_ns)
@@ -251,7 +254,18 @@ class LandingZoneRvizReplay(Node):
             local = np.asarray(value) - self.origin
             rays.points.extend((Point(x=float(local_camera[0]), y=float(local_camera[1]), z=float(local_camera[2])),
                                 Point(x=float(local[0]), y=float(local[1]), z=float(local[2]))))
-        return MarkerArray(markers=[clear, pink, trail, aircraft, outline, rays])
+
+        label = marker(5, "replay_sync", Marker.TEXT_VIEW_FACING, (1.0, 1.0, 1.0, 1.0), 0.75, timestamp_ns)
+        label.pose.position = Point(x=float(uav[0] - self.origin[0]),
+                                    y=float(uav[1] - self.origin[1]), z=float(uav[2] + 1.2))
+        label.text = f"Frame {frame_number:06d} | {timestamp_ns} ns"
+
+        registration = marker(6, "geographic_registration", Marker.LINE_LIST,
+                              (1.0, 0.2, 0.8, 1.0), 0.09, timestamp_ns)
+        for value in (uav, tf_uav):
+            local = value - self.origin
+            registration.points.append(Point(x=float(local[0]), y=float(local[1]), z=float(local[2])))
+        return MarkerArray(markers=[clear, pink, trail, aircraft, outline, rays, label, registration])
 
     def publish_image(self, frame: np.ndarray, timestamp_ns: int) -> None:
         if self.args.image_width > 0 and frame.shape[1] != self.args.image_width:
@@ -272,6 +286,7 @@ class LandingZoneRvizReplay(Node):
             tf_data, gps = read_pose_and_gps(self.args.bag, self.config)
             utm_to_map, diagnostics = fit_utm_to_map(tf_data, gps, self.config)
             vertical_offset = float(self.config["registration"]["lz_to_gnss_vertical_offset_m"])
+            gps_times = np.fromiter((item[0] for item in gps), dtype=np.int64)
             map_to_ortho = orthometric_from_map(utm_to_map, vertical_offset)
             ground_z = float(np.median([float(zone["z"]) for zone in self.zones]))
             self.get_logger().info(
@@ -289,12 +304,15 @@ class LandingZoneRvizReplay(Node):
             distortion = np.asarray(self.config["camera"]["distortion"], dtype=np.float64)
             first_stamp = last_publish = None
             last_occupancy_publish = None
+            last_zone_publish = None
+            zones_dirty = False
             wall_start = time.monotonic()
             trajectory: list[np.ndarray] = []
             frame_number = 0
             lidar_frame_number = 0
             interval_ns = int(1e9 / self.args.fps)
             occupancy_interval_ns = int(1e9 / float(self.config["dynamic_occupancy"]["publish_hz"]))
+            zone_interval_ns = int(1e9 / float(self.config["dynamic_occupancy"]["zone_publish_hz"]))
             max_lidar_range = float(self.config["dynamic_occupancy"]["maximum_lidar_range_m"])
             lidar_stride = int(self.config["dynamic_occupancy"]["point_stride"])
             while rclpy.ok() and not self.stop.is_set() and reader.has_next():
@@ -320,10 +338,13 @@ class LandingZoneRvizReplay(Node):
                     changed = self.occupancy.update(ortho_points)
                     lidar_frame_number += 1
                     if changed:
-                        previous_blocked = len(self.blocked_zones)
                         self.active_zones, self.blocked_zones = self.occupancy.classified_zones()
-                        if len(self.blocked_zones) != previous_blocked:
-                            self.static_pub.publish(self.zone_markers(timestamp))
+                        zones_dirty = True
+                    if (zones_dirty and (last_zone_publish is None
+                            or timestamp - last_zone_publish >= zone_interval_ns)):
+                        self.static_pub.publish(self.zone_markers(timestamp))
+                        last_zone_publish = timestamp
+                        zones_dirty = False
                     if (last_occupancy_publish is None
                             or timestamp - last_occupancy_publish >= occupancy_interval_ns):
                         self.occupancy_pub.publish(self.occupancy_markers(timestamp))
@@ -360,7 +381,9 @@ class LandingZoneRvizReplay(Node):
                     tf_data, [self.config["frames"]["map"], self.config["frames"]["base"]], timestamp,
                     float(self.config["synchronization"]["max_tf_gap_s"]),
                 )
-                uav = transform_points(map_to_ortho, map_to_base.translation[None, :])[0]
+                tf_uav = transform_points(map_to_ortho, map_to_base.translation[None, :])[0]
+                uav = interpolate_gps(gps, timestamp, vertical_offset, gps_times)
+                geographic_error = float(np.linalg.norm(uav[:2] - tf_uav[:2]))
                 if not trajectory or np.linalg.norm(uav - trajectory[-1]) > 0.1:
                     trajectory.append(uav)
                 footprint, _ = camera_footprint(
@@ -370,18 +393,19 @@ class LandingZoneRvizReplay(Node):
                 relative = (timestamp - first_stamp) / 1e9
                 text = f"Frame {frame_number:06d} | t={relative:.3f}s | ROS {timestamp} ns"
                 status = (f"LZ active {len(self.active_zones)} | blocked {len(self.blocked_zones)} | "
-                          f"LiDAR {lidar_frame_number}")
+                          f"LiDAR {lidar_frame_number} | GNSS/TF {geographic_error:.2f} m")
                 cv2.rectangle(frame, (0, 0), (frame.shape[1], 68), (0, 0, 0), -1)
                 cv2.putText(frame, text, (14, 27), cv2.FONT_HERSHEY_SIMPLEX,
                             0.62, (255, 255, 255), 2, cv2.LINE_AA)
                 cv2.putText(frame, status, (14, 55), cv2.FONT_HERSHEY_SIMPLEX,
                             0.62, (80, 220, 255), 2, cv2.LINE_AA)
                 zones_by_rank = {int(zone["rank"]): zone for zone in self.active_zones}
-                self.dynamic_pub.publish(self.dynamic_markers(
+                replay_markers = self.dynamic_markers(
                     timestamp, [zones_by_rank[rank] for rank in ranks if rank in zones_by_rank], trajectory,
-                    uav, ortho_to_optical.translation, footprint,
-                ))
+                    uav, ortho_to_optical.translation, footprint, frame_number, tf_uav,
+                )
                 self.publish_image(frame, timestamp)
+                self.dynamic_pub.publish(replay_markers)
                 last_publish = timestamp
                 if frame_number == 1 or frame_number % 120 == 0:
                     self.get_logger().info(

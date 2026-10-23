@@ -107,6 +107,8 @@ Visualization Manager:
         camera_footprint: true
         camera_frustum: true
         camera_visible_lz: true
+        geographic_registration: true
+        replay_sync: true
         uav: true
         uav_trajectory: true
       Topic:
