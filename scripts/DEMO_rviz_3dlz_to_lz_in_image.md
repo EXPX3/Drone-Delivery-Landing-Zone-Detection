@@ -45,9 +45,18 @@ Default files and topics:
 From the repository root:
 
 ```bash
+# Mount the bag SSD if it is not already mounted.
+findmnt -S /dev/nvme1n1p1 >/dev/null || udisksctl mount -b /dev/nvme1n1p1
+
 cd /home/gvb/Documents/robotspace/DDLZD_ws/Drone-Delivery-Landing-Zone-Detection
+docker rm -f ddlzd-lz-rviz 2>/dev/null || true
 scripts/lz_rviz_viewer/run_rviz_replay.sh
 ```
+
+The launcher finds the bag below any mounted `ssd24ubuntu*` path and validates
+that both `metadata.yaml` and a `.db3` database are present before opening RViz.
+This handles desktop mounts such as `/media/gvb/ssd24ubuntu1` when an old empty
+mount-point directory occupies `/media/gvb/ssd24ubuntu`.
 
 The launcher opens two windows:
 
@@ -61,7 +70,7 @@ launch. Interactive display toggles and camera changes therefore apply to that r
 without modifying or disabling the tracked demonstration configuration.
 
 The point cloud appears first. Dynamic replay begins after the full TF/GNSS scan,
-normally about 35-40 seconds on the current machine.
+normally about 60-90 seconds for the current 31 GB bag.
 
 Optional arguments are bag path, playback rate, and visualization FPS:
 

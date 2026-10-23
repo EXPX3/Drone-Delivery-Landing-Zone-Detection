@@ -2,10 +2,38 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-bag_path="${1:-/media/gvb/ssd24ubuntu/bags/Bagfilles_Feb13_2026/recovered_bag}"
+default_bag_relative="bags/Bagfilles_Feb13_2026/recovered_bag"
+bag_path="${1:-/media/gvb/ssd24ubuntu/${default_bag_relative}}"
 rate="${2:-1.0}"
 fps="${3:-12.0}"
 image="${DDLZD_RVIZ_IMAGE:-cargopack:2026}"
+
+if [[ $# -eq 0 && ! -f "${bag_path}/metadata.yaml" ]]; then
+  shopt -s nullglob
+  mounted_candidates=(/media/"${USER}"/ssd24ubuntu*/"${default_bag_relative}")
+  shopt -u nullglob
+  for candidate in "${mounted_candidates[@]}"; do
+    if [[ -f "${candidate}/metadata.yaml" ]]; then
+      bag_path="${candidate}"
+      break
+    fi
+  done
+fi
+
+if [[ ! -f "${bag_path}/metadata.yaml" ]] || ! compgen -G "${bag_path}/*.db3" >/dev/null; then
+  cat >&2 <<EOF
+ERROR: No readable ROS 2 bag was found at:
+  ${bag_path}
+
+Mount the SSD first, for example:
+  udisksctl mount -b /dev/nvme1n1p1
+
+Then pass the mounted bag path explicitly if needed.
+EOF
+  exit 1
+fi
+
+printf 'Using ROS 2 bag: %s\n' "${bag_path}"
 xauthority="${XAUTHORITY:-$HOME/.Xauthority}"
 xauth_args=()
 if [[ -f "${xauthority}" ]]; then
