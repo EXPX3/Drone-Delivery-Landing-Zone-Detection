@@ -102,7 +102,7 @@ The direct-return layer uses a fixed local-height gradient from blue near the gr
 through yellow to red at 3 m and above. Fixed bounds keep person, box, and car heights
 visually distinct even when tall trees are present.
 
-The viewer defaults to an exact, non-downsampled 25 m radius around the grounded bag
+The viewer defaults to an exact, non-downsampled 100 m radius around the grounded bag
 start (`696496.705, 5328128.777` UTM), retaining individual returns and nearby
 person/box/car-height changes without voxelization.
 Pass `--radius 0` to `mapping_audit_viewer.py` for the complete eight-million-point map.

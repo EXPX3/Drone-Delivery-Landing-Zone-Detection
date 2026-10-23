@@ -154,7 +154,7 @@ def main() -> int:
                         help="UTM center easting; default is the grounded bag start")
     parser.add_argument("--center-y", type=float, default=5328128.7768,
                         help="UTM center northing; default is the grounded bag start")
-    parser.add_argument("--radius", type=float, default=25.0,
+    parser.add_argument("--radius", type=float, default=100.0,
                         help="Display radius in metres; use 0 for the complete map")
     args = parser.parse_args()
     rclpy.init()
