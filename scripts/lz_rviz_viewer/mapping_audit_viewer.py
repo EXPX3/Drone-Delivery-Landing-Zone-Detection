@@ -85,6 +85,15 @@ def cloud_message(fields: list[str], values: np.ndarray, origin: np.ndarray) -> 
     return message
 
 
+def crop_xy(fields: list[str], values: np.ndarray, center: np.ndarray, radius: float) -> np.ndarray:
+    if radius <= 0:
+        return values
+    x = values[:, fields.index("x")]
+    y = values[:, fields.index("y")]
+    keep = (x - center[0]) ** 2 + (y - center[1]) ** 2 <= radius ** 2
+    return values[keep]
+
+
 class AuditPublisher(Node):
     def __init__(self, args: argparse.Namespace) -> None:
         super().__init__("ddlzd_mapping_audit_viewer")
@@ -94,6 +103,11 @@ class AuditPublisher(Node):
         change_fields, changes = read_pcd(args.changes)
         reference_xyz = reference[:, [reference_fields.index(name) for name in ("x", "y", "z")]]
         self.origin = np.median(reference_xyz, axis=0)
+        roi_center = np.array([args.center_x, args.center_y])
+        reference = crop_xy(reference_fields, reference, roi_center, args.radius)
+        direct = crop_xy(direct_fields, direct, roi_center, args.radius)
+        ground = crop_xy(ground_fields, ground, roi_center, args.radius)
+        changes = crop_xy(change_fields, changes, roi_center, args.radius)
         if len(reference) > args.maximum_reference_points:
             index = np.random.default_rng(31).choice(
                 len(reference), args.maximum_reference_points, replace=False,
@@ -119,16 +133,10 @@ class AuditPublisher(Node):
             self._layer_publishers.append(publisher)
             self._layer_messages.append(message)
             self.get_logger().info(f"Published {len(values)} points on {topic}")
-        self.timer = self.create_timer(2.0, self.republish)
         self.get_logger().info(
-            f"Local origin: {self.origin[0]:.3f}, {self.origin[1]:.3f}, {self.origin[2]:.3f}"
+            f"Local origin: {self.origin[0]:.3f}, {self.origin[1]:.3f}, {self.origin[2]:.3f}; "
+            f"ROI center: {args.center_x:.3f}, {args.center_y:.3f}, radius {args.radius:.1f} m"
         )
-
-    def republish(self) -> None:
-        for publisher, message in zip(self._layer_publishers, self._layer_messages):
-            message.header.stamp = self.get_clock().now().to_msg()
-            publisher.publish(message)
-
 
 def main() -> int:
     root = Path(__file__).resolve().parents[2]
@@ -142,6 +150,12 @@ def main() -> int:
     parser.add_argument("--changes", type=Path,
                         default=root / "pcds/lidar_mapping_accuracy/change_only_obstacles.pcd")
     parser.add_argument("--maximum-reference-points", type=int, default=250000)
+    parser.add_argument("--center-x", type=float, default=696496.704718,
+                        help="UTM center easting; default is the grounded bag start")
+    parser.add_argument("--center-y", type=float, default=5328128.7768,
+                        help="UTM center northing; default is the grounded bag start")
+    parser.add_argument("--radius", type=float, default=5.0,
+                        help="Display radius in metres; use 0 for the complete map")
     args = parser.parse_args()
     rclpy.init()
     node = AuditPublisher(args)
