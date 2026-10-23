@@ -29,7 +29,8 @@ from lz_bag_replay_viewer.replay_server import (  # noqa: E402
 )
 from lz_camera_projection import compose, load_landing_zones, scaled_camera_matrix, transform_points  # noqa: E402
 from lz_rviz_viewer.dynamic_occupancy import (  # noqa: E402
-    DynamicOccupancyMap, interpolate_gps, pointcloud2_xyz, TerrainHeightModel,
+    apply_centered_transform, DynamicOccupancyMap, interpolate_gps, pointcloud2_xyz,
+    TerrainHeightModel,
 )
 from project_lz_into_bag_camera import (  # noqa: E402
     chain_transform, config_transform, decode_image, draw_zones, fit_utm_to_map,
@@ -128,7 +129,11 @@ class LandingZoneRvizReplay(Node):
         if len(cloud) > args.max_points:
             indices = np.random.default_rng(17).choice(len(cloud), args.max_points, replace=False)
             cloud = cloud[indices]
-        self.origin = np.array([float(np.median(full_cloud[:, 0])), float(np.median(full_cloud[:, 1])), 0.0])
+        self.lidar_registration_origin = np.median(full_cloud, axis=0)
+        self.origin = self.lidar_registration_origin.copy()
+        # Keep native elevation values in RViz while using the true 3D median as
+        # the rotation pivot for the ICP correction.
+        self.origin[2] = 0.0
         self.lidar_correction = config_transform(self.config["registration"]["live_lidar_to_static"])
         dynamic = self.config["dynamic_occupancy"]
         self.occupancy = DynamicOccupancyMap(
@@ -334,9 +339,9 @@ class LandingZoneRvizReplay(Node):
                         continue
                     map_points = transform_points(map_to_lidar, lidar_points)
                     ortho_points = transform_points(map_to_ortho, map_points)
-                    ortho_points = transform_points(
-                        self.lidar_correction, ortho_points - self.origin,
-                    ) + self.origin
+                    ortho_points = apply_centered_transform(
+                        ortho_points, self.lidar_correction.matrix, self.lidar_registration_origin,
+                    )
                     changed = self.occupancy.update(ortho_points)
                     lidar_frame_number += 1
                     if changed:

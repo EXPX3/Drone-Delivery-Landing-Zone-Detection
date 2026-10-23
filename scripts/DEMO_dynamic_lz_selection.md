@@ -82,7 +82,9 @@ median residual: 0.2443 m
 
 The correction is stored under `registration.live_lidar_to_static` in
 `scripts/config/lz_camera_projection.yaml` and is applied around the static-cloud
-origin after map-to-orthometric conversion.
+3D median after map-to-orthometric conversion. The RViz display origin separately
+keeps Z at zero so native elevations remain visible; it must not be used as the ICP
+rotation pivot.
 
 ## Configuration
 

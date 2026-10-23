@@ -10,6 +10,15 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 
+def apply_centered_transform(points: np.ndarray, matrix: np.ndarray, origin: np.ndarray) -> np.ndarray:
+    """Apply a homogeneous transform around a full 3D registration pivot."""
+    points = np.asarray(points, dtype=np.float64)
+    origin = np.asarray(origin, dtype=np.float64)
+    centered = points - origin
+    homogeneous = np.column_stack((centered, np.ones(len(centered))))
+    return (np.asarray(matrix) @ homogeneous.T).T[:, :3] + origin
+
+
 def interpolate_gps(gps: list[tuple[int, float, float, float]], timestamp_ns: int,
                     vertical_offset: float, times: np.ndarray | None = None) -> np.ndarray:
     """Interpolate UTM/GNSS position at an image timestamp in orthometric Z."""
