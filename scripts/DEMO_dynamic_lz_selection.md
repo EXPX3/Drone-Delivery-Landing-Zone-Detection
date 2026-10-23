@@ -139,3 +139,27 @@ calibration, not UAV georegistration. The camera calibration remains provisional
 ```bash
 docker stop ddlzd-lz-rviz
 ```
+
+## LiDAR Mapping Accuracy Audit
+
+The offline audit builds a 0.20 m update-only ground map and measures direct-point
+residuals, repeated-cell layering, apparent scan tilt, IMU correlation, and the
+recorded IMU spectrum:
+
+```bash
+docker run --rm --name ddlzd-mapping-audit \
+  -v "$PWD:/workspace" \
+  -v /media/gvb/ssd24ubuntu1/bags/Bagfilles_Feb13_2026/recovered_bag:/bag:ro \
+  -w /workspace --entrypoint bash cargopack:2026 -lc \
+  'source /opt/ros/humble/setup.bash && \
+   python3 scripts/analyze_lidar_mapping_accuracy.py --bag /bag'
+```
+
+Generated results are under `pcds/lidar_mapping_accuracy/`. The PCD contains only
+one final point per changed XY cell; repeated observations are summarized in the
+JSON and per-scan CSV instead of creating visible layers.
+
+Measured results and the mount-vibration assessment are documented in
+`scripts/LIDAR_MAPPING_ACCURACY_REPORT.md`. The pipeline also writes
+`change_only_obstacles.pcd`, which excludes original Bayern geometry and keeps
+confirmed above-ground changes in a separate 0.20 m map.

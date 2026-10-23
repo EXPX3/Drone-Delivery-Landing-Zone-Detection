@@ -68,13 +68,14 @@ def ros_transform(message: object) -> Transform:
 
 
 def read_pose_and_gps(bag_path: Path, config: dict) -> tuple[dict, list]:
-    _, deserialize_message, get_message = require_ros()
+    rosbag2_py, deserialize_message, get_message = require_ros()
     reader = open_reader(bag_path)
     topic_types = {item.name: item.type for item in reader.get_all_topics_and_types()}
     selected = {config["topics"][key] for key in ("tf", "tf_static", "gps")}
     missing = selected.difference(topic_types)
     if missing:
         raise RuntimeError(f"Bag is missing required topics: {sorted(missing)}")
+    reader.set_filter(rosbag2_py.StorageFilter(topics=sorted(selected)))
     message_types = {topic: get_message(topic_types[topic]) for topic in selected}
     dynamic: dict[tuple[str, str], list[tuple[int, Transform]]] = defaultdict(list)
     static: dict[tuple[str, str], Transform] = {}
