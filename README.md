@@ -12,6 +12,7 @@ Additional workflows:
 - [Landing-zone projection into recorded camera images](scripts/README_lz_camera_projection.md)
 - [Synchronized bag, UAV trajectory, camera, and LZ browser replay](scripts/lz_bag_replay_viewer/README.md)
 - [Current demonstration state and launch commands](scripts/DEMO_rviz_3dlz_to_lz_in_image.md)
+- [Dynamic occupancy and landing-zone selection demo](scripts/DEMO_dynamic_lz_selection.md)
 
 ## Current landing-zone camera demonstration
 

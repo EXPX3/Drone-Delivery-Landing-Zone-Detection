@@ -9,6 +9,7 @@ calibration:
 
 topics:
   image: /GremsyVIO/image/cpu
+  lidar_points: /velodyne_points
   gps: /mavros/global_position/global
   tf: /tf
   tf_static: /tf_static
@@ -17,6 +18,25 @@ frames:
   map: map
   base: base_link
   camera_chain: [map, base_link, altax_center_flu, camera_body_flu]
+  lidar_chain: [map, base_link, altax_center_flu, velodyne]
+
+dynamic_occupancy:
+  # Sparse endpoint occupancy. A voxel must be observed repeatedly before it can
+  # affect a landing zone, suppressing isolated returns and registration noise.
+  resolution_m: 0.75
+  confirmation_hits: 3
+  maximum_lidar_range_m: 80.0
+  point_stride: 2
+  publish_hz: 2.0
+  max_visualized_voxels: 120000
+  # Reuse the risk model's wind/GNSS margin. Confirmed occupancy inside a zone
+  # blocks it; occupancy inside this outer margin downgrades it to risky.
+  gps_wind_margin_m: 2.0
+  obstacle_min_height_m: 0.35
+  vertical_clearance_m: 20.0
+  # RViz-only lift keeps rings above voxel faces; geometry and camera projection
+  # continue to use the measured landing-surface elevation.
+  zone_visual_lift_m: 0.65
 
 camera:
   calibration_size: [1920, 1080]
@@ -38,6 +58,15 @@ registration:
   maximum_horizontal_rmse_m: 5.0
   # Added to Bayern LiDAR/DHHN heights before mapping through GNSS altitude.
   lz_to_gnss_vertical_offset_m: 45.0
+  # ICP fit of 240 registered Velodyne frames against the Bayern static cloud.
+  # Applied around the static-cloud origin after map -> orthometric conversion.
+  live_lidar_to_static:
+    method: robust_point_to_point_icp
+    sample_frames: 240
+    translation_m: [0.007155, -0.107244, -1.638995]
+    quaternion_xyzw: [-0.001844951, 0.012873635, 0.000334794, 0.999915373]
+    median_residual_m: 0.2443
+    p75_residual_m: 0.3177
 
 synchronization:
   max_tf_gap_s: 0.25

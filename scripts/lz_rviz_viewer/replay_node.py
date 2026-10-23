@@ -18,7 +18,7 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image, PointCloud2, PointField
-from std_msgs.msg import Header
+from std_msgs.msg import ColorRGBA, Header
 from visualization_msgs.msg import Marker, MarkerArray
 
 SCRIPTS = Path(__file__).resolve().parents[1]
@@ -28,6 +28,7 @@ from lz_bag_replay_viewer.replay_server import (  # noqa: E402
     camera_footprint, displayed_zone_ring, orthometric_from_map,
 )
 from lz_camera_projection import compose, load_landing_zones, scaled_camera_matrix, transform_points  # noqa: E402
+from lz_rviz_viewer.dynamic_occupancy import DynamicOccupancyMap, pointcloud2_xyz  # noqa: E402
 from project_lz_into_bag_camera import (  # noqa: E402
     chain_transform, config_transform, decode_image, draw_zones, fit_utm_to_map,
     open_reader, read_pose_and_gps, require_ros, stamp_ns,
@@ -40,6 +41,7 @@ COLORS = {
     "risky": (1.0, 0.0, 0.0, 1.0),
     "top30": (0.565, 0.933, 0.565, 1.0),
     "pink": (1.0, 0.714, 0.757, 1.0),
+    "blocked": (0.55, 0.55, 0.58, 0.95),
 }
 
 
@@ -57,7 +59,7 @@ def read_ascii_pcd(path: Path, max_points: int) -> np.ndarray:
             if line.strip().lower() == "data ascii":
                 break
         points = np.loadtxt(handle, dtype=np.float64, usecols=(0, 1, 2))
-    if len(points) > max_points:
+    if max_points > 0 and len(points) > max_points:
         indices = np.random.default_rng(17).choice(len(points), max_points, replace=False)
         points = points[indices]
     return points
@@ -117,8 +119,23 @@ class LandingZoneRvizReplay(Node):
         with args.config.open(encoding="utf-8") as handle:
             self.config = yaml.safe_load(handle)
         self.zones = load_landing_zones(args.zones, None, 0)
-        cloud = read_ascii_pcd(args.pcd, args.max_points)
-        self.origin = np.array([float(np.median(cloud[:, 0])), float(np.median(cloud[:, 1])), 0.0])
+        full_cloud = read_ascii_pcd(args.pcd, 0)
+        cloud = full_cloud
+        if len(cloud) > args.max_points:
+            indices = np.random.default_rng(17).choice(len(cloud), args.max_points, replace=False)
+            cloud = cloud[indices]
+        self.origin = np.array([float(np.median(full_cloud[:, 0])), float(np.median(full_cloud[:, 1])), 0.0])
+        self.lidar_correction = config_transform(self.config["registration"]["live_lidar_to_static"])
+        dynamic = self.config["dynamic_occupancy"]
+        self.occupancy = DynamicOccupancyMap(
+            full_cloud, self.zones,
+            resolution=float(dynamic["resolution_m"]),
+            gps_margin_m=float(dynamic["gps_wind_margin_m"]),
+            obstacle_min_height_m=float(dynamic["obstacle_min_height_m"]),
+            vertical_clearance_m=float(dynamic["vertical_clearance_m"]),
+            min_obstacle_voxels=int(dynamic["confirmation_hits"]),
+        )
+        self.active_zones, self.blocked_zones = self.occupancy.classified_zones()
 
         durable = QoSProfile(
             history=HistoryPolicy.KEEP_LAST, depth=1,
@@ -129,22 +146,79 @@ class LandingZoneRvizReplay(Node):
         self.cloud_pub = self.create_publisher(PointCloud2, "/ddlzd/pointcloud", durable)
         self.static_pub = self.create_publisher(MarkerArray, "/ddlzd/landing_zones", durable)
         self.dynamic_pub = self.create_publisher(MarkerArray, "/ddlzd/replay_markers", live)
+        self.occupancy_pub = self.create_publisher(MarkerArray, "/ddlzd/occupancy", durable)
         self.image_pub = self.create_publisher(Image, "/ddlzd/camera_overlay", live)
         self.cloud_pub.publish(point_cloud_message(cloud, self.origin))
-        self.static_pub.publish(self.static_zone_markers())
-        self.get_logger().info(f"Published {len(cloud)} cloud points and {len(self.zones)} landing zones")
+        self.static_pub.publish(self.zone_markers(0))
+        self.occupancy_pub.publish(self.occupancy_markers(0, include_baseline=True))
+        self.get_logger().info(
+            f"Published {len(cloud)} cloud points, {len(self.zones)} landing zones, and "
+            f"{len(self.occupancy.baseline_keys)} baseline occupancy voxels"
+        )
         self.worker = threading.Thread(target=self.replay, daemon=True)
         self.worker.start()
 
-    def static_zone_markers(self) -> MarkerArray:
+    def zone_markers(self, timestamp_ns: int) -> MarkerArray:
+        clear = Marker()
+        clear.header.frame_id = FRAME_ID
+        ros_stamp(clear, timestamp_ns)
+        clear.action = Marker.DELETEALL
         grouped = {
-            name: marker(index, f"landing_zones_{name}", Marker.LINE_LIST, COLORS[name], 0.07, 0)
+            name: marker(index, f"landing_zones_{name}", Marker.LINE_LIST, COLORS[name], 0.07, timestamp_ns)
             for index, name in enumerate(("top30", "safest", "safe", "risky"))
         }
-        for zone in self.zones:
-            name = "top30" if int(zone["rank"]) <= 30 else str(zone["category"])
-            append_segments(grouped[name], displayed_zone_ring(zone, samples=32), self.origin)
-        return MarkerArray(markers=list(grouped.values()))
+        for zone in self.active_zones:
+            name = "top30" if int(zone["rank"]) <= 30 and zone["dynamic_state"] == "unchanged" else str(zone["category"])
+            append_segments(grouped[name], self.visual_zone_ring(zone), self.origin)
+        blocked = marker(10, "landing_zones_blocked", Marker.LINE_LIST, COLORS["blocked"], 0.14, timestamp_ns)
+        for zone in self.blocked_zones:
+            center = np.array([
+                float(zone["x"]), float(zone["y"]),
+                float(zone["z"]) + float(self.config["dynamic_occupancy"]["zone_visual_lift_m"]),
+            ])
+            radius = float(zone["radius"])
+            segments = np.array([
+                center + [-radius, -radius, 0.0], center + [radius, radius, 0.0],
+                center + [-radius, radius, 0.0], center + [radius, -radius, 0.0],
+            ])
+            append_segments(blocked, segments[:2], self.origin, close=False)
+            append_segments(blocked, segments[2:], self.origin, close=False)
+        return MarkerArray(markers=[clear, *grouped.values(), blocked])
+
+    def visual_zone_ring(self, zone: dict) -> np.ndarray:
+        ring = displayed_zone_ring(zone, samples=32)
+        ring[:, 2] += float(self.config["dynamic_occupancy"]["zone_visual_lift_m"])
+        return ring
+
+    @staticmethod
+    def altitude_color(value: float) -> ColorRGBA:
+        value = float(np.clip(value, 0.0, 1.0))
+        anchors = np.array([[0.08, 0.20, 0.72], [0.00, 0.78, 0.88],
+                            [0.95, 0.88, 0.15], [0.88, 0.12, 0.08]])
+        scaled = value * (len(anchors) - 1)
+        index = min(int(scaled), len(anchors) - 2)
+        fraction = scaled - index
+        rgb = anchors[index] * (1.0 - fraction) + anchors[index + 1] * fraction
+        return ColorRGBA(r=float(rgb[0]), g=float(rgb[1]), b=float(rgb[2]), a=0.46)
+
+    def occupancy_markers(self, timestamp_ns: int, include_baseline: bool = False) -> MarkerArray:
+        values = self.occupancy.occupied_centers(include_baseline=include_baseline)
+        limit = int(self.config["dynamic_occupancy"]["max_visualized_voxels"])
+        if len(values) > limit:
+            indices = np.random.default_rng(23).choice(len(values), limit, replace=False)
+            values = values[indices]
+        marker_id = 0 if include_baseline else 1
+        namespace = "baseline_occupancy" if include_baseline else "live_occupancy"
+        item = marker(marker_id, namespace, Marker.CUBE_LIST, (1.0, 1.0, 1.0, 0.72),
+                      self.occupancy.resolution * 0.92, timestamp_ns)
+        if len(values):
+            z_min, z_max = float(values[:, 2].min()), float(values[:, 2].max())
+            span = max(z_max - z_min, 1e-6)
+            for value in values:
+                local = value - self.origin
+                item.points.append(Point(x=float(local[0]), y=float(local[1]), z=float(local[2])))
+                item.colors.append(self.altitude_color((float(value[2]) - z_min) / span))
+        return MarkerArray(markers=[item])
 
     def dynamic_markers(self, timestamp_ns: int, visible_zones: list[dict], trajectory: list[np.ndarray],
                         uav: np.ndarray, camera: np.ndarray, footprint: list[list[float]]) -> MarkerArray:
@@ -155,7 +229,7 @@ class LandingZoneRvizReplay(Node):
 
         pink = marker(0, "camera_visible_lz", Marker.LINE_LIST, COLORS["pink"], 0.18, timestamp_ns)
         for zone in visible_zones:
-            append_segments(pink, displayed_zone_ring(zone, samples=32), self.origin)
+            append_segments(pink, self.visual_zone_ring(zone), self.origin)
 
         trail = marker(1, "uav_trajectory", Marker.LINE_STRIP, (0.16, 0.71, 0.96, 1.0), 0.12, timestamp_ns)
         for value in trajectory:
@@ -200,7 +274,6 @@ class LandingZoneRvizReplay(Node):
             vertical_offset = float(self.config["registration"]["lz_to_gnss_vertical_offset_m"])
             map_to_ortho = orthometric_from_map(utm_to_map, vertical_offset)
             ground_z = float(np.median([float(zone["z"]) for zone in self.zones]))
-            zones_by_rank = {int(zone["rank"]): zone for zone in self.zones}
             self.get_logger().info(
                 f"Registration ready: RMSE {diagnostics['horizontal_rmse_m']:.3f} m; replay starting"
             )
@@ -209,16 +282,53 @@ class LandingZoneRvizReplay(Node):
             reader = open_reader(self.args.bag)
             topic_types = {item.name: item.type for item in reader.get_all_topics_and_types()}
             image_topic = self.config["topics"]["image"]
+            lidar_topic = self.config["topics"]["lidar_points"]
             image_type = get_message(topic_types[image_topic])
+            lidar_type = get_message(topic_types[lidar_topic])
             native_k = np.asarray(self.config["camera"]["matrix"], dtype=np.float64)
             distortion = np.asarray(self.config["camera"]["distortion"], dtype=np.float64)
             first_stamp = last_publish = None
+            last_occupancy_publish = None
             wall_start = time.monotonic()
             trajectory: list[np.ndarray] = []
             frame_number = 0
+            lidar_frame_number = 0
             interval_ns = int(1e9 / self.args.fps)
+            occupancy_interval_ns = int(1e9 / float(self.config["dynamic_occupancy"]["publish_hz"]))
+            max_lidar_range = float(self.config["dynamic_occupancy"]["maximum_lidar_range_m"])
+            lidar_stride = int(self.config["dynamic_occupancy"]["point_stride"])
             while rclpy.ok() and not self.stop.is_set() and reader.has_next():
                 topic, raw, bag_time = reader.read_next()
+                if topic == lidar_topic:
+                    message = deserialize_message(raw, lidar_type)
+                    timestamp = stamp_ns(message, bag_time)
+                    lidar_points = pointcloud2_xyz(message)[::lidar_stride]
+                    ranges = np.linalg.norm(lidar_points, axis=1)
+                    lidar_points = lidar_points[(ranges > 1.0) & (ranges <= max_lidar_range)]
+                    try:
+                        map_to_lidar = chain_transform(
+                            tf_data, self.config["frames"]["lidar_chain"], timestamp,
+                            float(self.config["synchronization"]["max_tf_gap_s"]),
+                        )
+                    except LookupError:
+                        continue
+                    map_points = transform_points(map_to_lidar, lidar_points)
+                    ortho_points = transform_points(map_to_ortho, map_points)
+                    ortho_points = transform_points(
+                        self.lidar_correction, ortho_points - self.origin,
+                    ) + self.origin
+                    changed = self.occupancy.update(ortho_points)
+                    lidar_frame_number += 1
+                    if changed:
+                        previous_blocked = len(self.blocked_zones)
+                        self.active_zones, self.blocked_zones = self.occupancy.classified_zones()
+                        if len(self.blocked_zones) != previous_blocked:
+                            self.static_pub.publish(self.zone_markers(timestamp))
+                    if (last_occupancy_publish is None
+                            or timestamp - last_occupancy_publish >= occupancy_interval_ns):
+                        self.occupancy_pub.publish(self.occupancy_markers(timestamp))
+                        last_occupancy_publish = timestamp
+                    continue
                 if topic != image_topic:
                     continue
                 message = deserialize_message(raw, image_type)
@@ -243,7 +353,7 @@ class LandingZoneRvizReplay(Node):
                 )
                 map_to_optical = compose(map_to_mount, config_transform(self.config["camera"]["mount_to_optical"]))
                 ranks: list[int] = []
-                draw_zones(frame, self.zones, map_to_optical, utm_to_map, camera_matrix,
+                draw_zones(frame, self.active_zones, map_to_optical, utm_to_map, camera_matrix,
                            distortion, vertical_offset, 0.25, visible_ranks_out=ranks)
                 ortho_to_optical = compose(map_to_ortho, map_to_optical)
                 map_to_base = chain_transform(
@@ -259,18 +369,24 @@ class LandingZoneRvizReplay(Node):
                 frame_number += 1
                 relative = (timestamp - first_stamp) / 1e9
                 text = f"Frame {frame_number:06d} | t={relative:.3f}s | ROS {timestamp} ns"
-                cv2.rectangle(frame, (0, 0), (frame.shape[1], 42), (0, 0, 0), -1)
-                cv2.putText(frame, text, (14, 29), cv2.FONT_HERSHEY_SIMPLEX,
-                            0.68, (255, 255, 255), 2, cv2.LINE_AA)
+                status = (f"LZ active {len(self.active_zones)} | blocked {len(self.blocked_zones)} | "
+                          f"LiDAR {lidar_frame_number}")
+                cv2.rectangle(frame, (0, 0), (frame.shape[1], 68), (0, 0, 0), -1)
+                cv2.putText(frame, text, (14, 27), cv2.FONT_HERSHEY_SIMPLEX,
+                            0.62, (255, 255, 255), 2, cv2.LINE_AA)
+                cv2.putText(frame, status, (14, 55), cv2.FONT_HERSHEY_SIMPLEX,
+                            0.62, (80, 220, 255), 2, cv2.LINE_AA)
+                zones_by_rank = {int(zone["rank"]): zone for zone in self.active_zones}
                 self.dynamic_pub.publish(self.dynamic_markers(
-                    timestamp, [zones_by_rank[rank] for rank in ranks], trajectory,
+                    timestamp, [zones_by_rank[rank] for rank in ranks if rank in zones_by_rank], trajectory,
                     uav, ortho_to_optical.translation, footprint,
                 ))
                 self.publish_image(frame, timestamp)
                 last_publish = timestamp
                 if frame_number == 1 or frame_number % 120 == 0:
                     self.get_logger().info(
-                        f"Published frame {frame_number} at bag t={relative:.2f}s with {len(ranks)} visible LZs"
+                        f"Published frame {frame_number} at bag t={relative:.2f}s with {len(ranks)} visible LZs; "
+                        f"{len(self.active_zones)} active, {len(self.blocked_zones)} blocked"
                     )
             self.get_logger().info("Replay complete")
         except Exception as exc:
