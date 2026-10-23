@@ -88,6 +88,15 @@ Outputs are generated in `pcds/lidar_mapping_accuracy/`:
 - `update_only_ground_map.pcd`: ground-anchored update-only map;
 - `change_only_obstacles.pcd`: confirmed scene changes without baseline ground.
 
+Inspect all map layers interactively in RViz:
+
+```bash
+scripts/lz_rviz_viewer/run_mapping_audit_viewer.sh
+```
+
+Use the RViz Displays panel to toggle the Bayern reference, corrected update-only
+ground, and confirmed scene-change layers independently.
+
 For a definitive vibration test, record the LiDAR packet firing times and a rigidly
 mounted IMU at several hundred hertz or above. Then deskew each return using the
 continuous-time body pose and compare maps with and without deskew using this same
