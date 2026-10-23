@@ -1,0 +1,4 @@
+kiss-icp==1.2.3
+numpy==2.5.4
+PyYAML==6.0.3
+rosbags==0.10.11

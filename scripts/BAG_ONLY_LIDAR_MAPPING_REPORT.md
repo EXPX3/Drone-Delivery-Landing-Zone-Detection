@@ -62,6 +62,13 @@ Integrate a proven engine such as FAST-LIO2 or LIO-SAM. Use deskewed raw points 
 IMU propagation, local scan-to-map residuals, keyframes, and uncertainty-aware state
 updates. Do not use unrestricted per-scan ICP against the Bayern cloud.
 
+The recorded 35 Hz IMU does not meet LIO-SAM's upstream recommendation of at least
+200 Hz. Consequently, the implemented intermediate stage uses KISS-ICP 1.2.3 with
+correctly paired per-point timestamps and onboard odometry as a motion prior. A
+0.20 m / 5 degree innovation gate and low-pass map-to-odometry correction prevent
+flat-ground registration ambiguity from entering the reconstructed map. This is
+scan-to-local-map optimization, not a claim of tightly coupled LIO.
+
 ### Phase 4: global consistency
 
 Add GNSS and heading as weighted factors, detect the return to the starting area as a
@@ -135,6 +142,35 @@ the deskewed map and 0.796 m for the control. Thus this first deskew baseline do
 **not** demonstrate a mapping improvement and must not replace the control map yet.
 It indicates that trajectory timing/extrinsics and tightly coupled LIO are necessary.
 The column statistic includes real vertical structures and is not an accuracy metric.
+
+## Optimized reconstruction and surfel result
+
+The first unconstrained KISS-ICP smoke test failed the grounded-start validation:
+it accumulated 15.65 m of scan-wise motion in ten seconds while onboard odometry
+accumulated only 0.267 m. Investigation found that the upstream ROS adapter removed
+NaN XYZ rows without removing matching timestamp rows. A project-owned adapter now
+applies one shared mask. Even after that correction, flat-ground ICP remained
+underconstrained, motivating the odometry prior and innovation gate.
+
+The validated grounded run accumulates 0.321 m and ends 0.018 m from its start. The
+complete run processed all 3,436 scans, reconstructed 7,983,601 points, and ran at
+22.3 scans/s. It rejected 2,157 LiDAR innovations above 0.20 m, so its trajectory is
+conservatively odometry anchored.
+
+Ten-centimetre probabilistic fusion produced 3,135,787 occupied surfels. Every cell
+stores centroid, observation count and covariance; 358,139 cells with at least five
+observations also store a valid normal. Their median normal-direction standard
+deviation is 0.0127 m and P95 is 0.0220 m. Sparse cells remain available for small
+object inspection rather than being discarded. Global loop/GNSS graph optimization
+and final reconstruction remain the next phase before held-out Bayern evaluation.
+
+The internal repeated-column proxy is 0.829 m median for the reconstructed map,
+compared with 0.796 m for the original single-pose control. This statistic mixes
+ground with genuine vertical and dynamic structure, but it supplies no evidence that
+the current optimization sharpened the complete map. Likewise, the 0.0127 m surfel
+spread measures only points grouped inside one 10 cm voxel; it is not global mapping
+accuracy. The new artifacts are therefore research intermediates, not a promoted
+replacement for the control map.
 
 ## Technical references
 

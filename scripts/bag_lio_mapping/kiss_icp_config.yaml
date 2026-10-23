@@ -1,0 +1,26 @@
+data:
+  odometry_topic: /mavros/local_position/odom
+  min_range_m: 1.0
+  max_range_m: 80.0
+  deskew: true
+registration:
+  max_num_iterations: 100
+  convergence_criterion: 0.0001
+  max_num_threads: 0
+mapping:
+  voxel_size_m: 0.5
+  max_points_per_voxel: 20
+adaptive_threshold:
+  fixed_threshold_m: 0.3
+  initial_threshold_m: 0.5
+  minimum_motion_m: 0.05
+innovation_gate:
+  maximum_translation_m: 0.20
+  maximum_rotation_deg: 5.0
+  correction_smoothing_alpha: 0.05
+reconstruction:
+  point_stride: 4
+extrinsic_base_from_lidar:
+  # Recorded TF chain: base_link -> altax_center_flu -> velodyne.
+  translation_m: [0.13, -0.145, -0.11]
+  quaternion_xyzw: [0.0, 0.7071067811865475, 0.0, 0.7071067811865477]
