@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import shutil
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -47,6 +48,34 @@ class Reservoir:
 
     def array(self) -> np.ndarray:
         return self.values[:min(self.count, self.capacity)]
+
+
+class BinaryPcdWriter:
+    """Stream XYZ returns and finalize a binary PCD without buffering the map."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.temporary = path.with_suffix(path.suffix + ".points.tmp")
+        self.handle = self.temporary.open("wb")
+        self.count = 0
+
+    def write(self, points: np.ndarray) -> None:
+        xyz = np.ascontiguousarray(points[:, :3], dtype=np.float32)
+        self.handle.write(xyz.tobytes())
+        self.count += len(xyz)
+
+    def close(self) -> None:
+        self.handle.close()
+        header = (
+            "# .PCD v0.7 - Point Cloud Data file format\nVERSION 0.7\nFIELDS x y z\n"
+            "SIZE 4 4 4\nTYPE F F F\nCOUNT 1 1 1\n"
+            f"WIDTH {self.count}\nHEIGHT 1\nVIEWPOINT 0 0 0 1 0 0 0\n"
+            f"POINTS {self.count}\nDATA binary\n"
+        )
+        with self.path.open("wb") as destination, self.temporary.open("rb") as source:
+            destination.write(header.encode("ascii"))
+            shutil.copyfileobj(source, destination, length=4 * 1024 * 1024)
+        self.temporary.unlink()
 
 
 def filtered_reader(path: Path, topics: list[str]):
@@ -160,6 +189,7 @@ def main() -> int:
     raw_residual_sample = Reservoir(1_000_000)
     corrected_residual_sample = Reservoir(1_000_000, seed=29)
     scan_rows = []
+    direct_writer = BinaryPcdWriter(args.output / "direct_corrected_pointcloud.pcd")
     total_points = ground_points = changed_cells = scans = 0
     while reader.has_next() and (not args.max_scans or scans < args.max_scans):
         _, raw, bag_time = reader.read_next()
@@ -185,6 +215,7 @@ def main() -> int:
         raw_residual_sample.add(residual)
         vertical_bias = float(np.median(residual))
         mapped[:, 2] -= vertical_bias
+        direct_writer.write(mapped)
         corrected_residual = mapped[:, 2] - ground[index, 2]
         corrected_ground = (distance <= 0.45) & (np.abs(corrected_residual) <= 0.30)
         points = mapped[corrected_ground]
@@ -240,6 +271,7 @@ def main() -> int:
         if scans % 250 == 0:
             print(f"Processed {scans} scans, {ground_points} ground returns, {len(cells)} cells", flush=True)
 
+    direct_writer.close()
     scan_data = np.asarray(scan_rows, dtype=np.float64)
     imu_index = nearest_rows(imu_times, scan_data[:, 0].astype(np.int64))
     angular_speed = np.linalg.norm(angular[imu_index], axis=1)
@@ -291,6 +323,7 @@ def main() -> int:
             "lidar_correction_enabled": not args.disable_lidar_correction,
             "ground_reference": str(args.ground_pcd), "ground_gate_m": args.ground_gate,
             "changed_cell_updates": changed_cells,
+            "direct_point_count": direct_writer.count,
             "note": "Output map stores one final point per XY cell; repeated samples are retained only as statistics.",
         },
         "registration": registration,

@@ -85,6 +85,8 @@ Outputs are generated in `pcds/lidar_mapping_accuracy/`:
 
 - `mapping_accuracy_report.json`: aggregate accuracy and IMU statistics;
 - `per_scan_metrics.csv`: time-resolved bias, RMSE, tilt, and motion values;
+- `direct_corrected_pointcloud.pcd`: individual corrected LiDAR returns without
+  voxelization or per-cell averaging;
 - `update_only_ground_map.pcd`: ground-anchored update-only map;
 - `change_only_obstacles.pcd`: confirmed scene changes without baseline ground.
 
@@ -96,6 +98,9 @@ scripts/lz_rviz_viewer/run_mapping_audit_viewer.sh
 
 Use the RViz Displays panel to toggle the Bayern reference, corrected update-only
 ground, and confirmed scene-change layers independently.
+The direct-return layer uses a fixed local-height gradient from blue near the ground
+through yellow to red at 3 m and above. Fixed bounds keep person, box, and car heights
+visually distinct even when tall trees are present.
 
 For a definitive vibration test, record the LiDAR packet firing times and a rigidly
 mounted IMU at several hundred hertz or above. Then deskew each return using the

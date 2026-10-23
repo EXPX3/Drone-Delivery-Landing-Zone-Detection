@@ -14,21 +14,48 @@ from sensor_msgs.msg import PointCloud2, PointField
 from std_msgs.msg import Header
 
 
-def read_ascii_pcd(path: Path) -> tuple[list[str], np.ndarray]:
-    fields = None
-    with path.open("r", encoding="ascii") as handle:
+def read_pcd(path: Path) -> tuple[list[str], np.ndarray]:
+    fields = sizes = types = counts = None
+    point_count = 0
+    with path.open("rb") as handle:
         while True:
             line = handle.readline()
             if not line:
                 raise ValueError(f"PCD has no DATA header: {path}")
-            tokens = line.strip().split()
+            tokens = line.decode("ascii").strip().split()
             if tokens and tokens[0].upper() == "FIELDS":
                 fields = tokens[1:]
-            if line.strip().lower() == "data ascii":
+            elif tokens and tokens[0].upper() == "SIZE":
+                sizes = [int(value) for value in tokens[1:]]
+            elif tokens and tokens[0].upper() == "TYPE":
+                types = tokens[1:]
+            elif tokens and tokens[0].upper() == "COUNT":
+                counts = [int(value) for value in tokens[1:]]
+            elif tokens and tokens[0].upper() == "POINTS":
+                point_count = int(tokens[1])
+            if tokens and tokens[0].upper() == "DATA":
+                encoding = tokens[1].lower()
                 break
-        values = np.loadtxt(handle, dtype=np.float64, ndmin=2)
-    if fields is None or not {"x", "y", "z"}.issubset(fields):
-        raise ValueError(f"PCD does not contain XYZ fields: {path}")
+        if fields is None or not {"x", "y", "z"}.issubset(fields):
+            raise ValueError(f"PCD does not contain XYZ fields: {path}")
+        if encoding == "ascii":
+            values = np.loadtxt(handle, dtype=np.float64, ndmin=2)
+        elif encoding == "binary":
+            if sizes is None or types is None:
+                raise ValueError(f"Binary PCD has incomplete metadata: {path}")
+            counts = counts or [1] * len(fields)
+            formats = []
+            supported = {("F", 4): "<f4", ("F", 8): "<f8", ("U", 4): "<u4", ("I", 4): "<i4"}
+            for size, field_type, count in zip(sizes, types, counts):
+                code = supported.get((field_type.upper(), size))
+                if code is None or count != 1:
+                    raise ValueError(f"Unsupported binary PCD field in {path}")
+                formats.append(code)
+            dtype = np.dtype({"names": fields, "formats": formats})
+            packed = np.frombuffer(handle.read(), dtype=dtype, count=point_count)
+            values = np.column_stack([packed[name] for name in fields]).astype(np.float64)
+        else:
+            raise ValueError(f"Unsupported PCD encoding {encoding}: {path}")
     return fields, values
 
 
@@ -61,9 +88,10 @@ def cloud_message(fields: list[str], values: np.ndarray, origin: np.ndarray) -> 
 class AuditPublisher(Node):
     def __init__(self, args: argparse.Namespace) -> None:
         super().__init__("ddlzd_mapping_audit_viewer")
-        reference_fields, reference = read_ascii_pcd(args.reference)
-        ground_fields, ground = read_ascii_pcd(args.ground)
-        change_fields, changes = read_ascii_pcd(args.changes)
+        reference_fields, reference = read_pcd(args.reference)
+        direct_fields, direct = read_pcd(args.direct)
+        ground_fields, ground = read_pcd(args.ground)
+        change_fields, changes = read_pcd(args.changes)
         reference_xyz = reference[:, [reference_fields.index(name) for name in ("x", "y", "z")]]
         self.origin = np.median(reference_xyz, axis=0)
         if len(reference) > args.maximum_reference_points:
@@ -78,6 +106,7 @@ class AuditPublisher(Node):
         )
         layers = [
             ("/ddlzd/audit/reference_ground", reference_fields, reference),
+            ("/ddlzd/audit/direct_pointcloud", direct_fields, direct),
             ("/ddlzd/audit/corrected_ground", ground_fields, ground),
             ("/ddlzd/audit/scene_changes", change_fields, changes),
         ]
@@ -108,6 +137,8 @@ def main() -> int:
                         default=root / "pcds/696_5328_cropped_ground_only.pcd")
     parser.add_argument("--ground", type=Path,
                         default=root / "pcds/lidar_mapping_accuracy/update_only_ground_map.pcd")
+    parser.add_argument("--direct", type=Path,
+                        default=root / "pcds/lidar_mapping_accuracy/direct_corrected_pointcloud.pcd")
     parser.add_argument("--changes", type=Path,
                         default=root / "pcds/lidar_mapping_accuracy/change_only_obstacles.pcd")
     parser.add_argument("--maximum-reference-points", type=int, default=250000)
