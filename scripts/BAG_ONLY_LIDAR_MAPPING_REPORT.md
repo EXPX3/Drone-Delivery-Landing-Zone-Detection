@@ -172,6 +172,13 @@ spread measures only points grouped inside one 10 cm voxel; it is not global map
 accuracy. The new artifacts are therefore research intermediates, not a promoted
 replacement for the control map.
 
+A separate supported-surface product uses 20 cm voxels and requires at least three
+observations. It retains 484,843 surfels, including 342,096 cells with valid normals,
+and is intended for cleaner visual inspection. This product can suppress isolated
+returns and merge nearby layers, but it can also remove sparsely observed small or
+transient objects. Repeated vertical errors remain possible and must ultimately be
+addressed in trajectory/extrinsic optimization.
+
 ## Technical references
 
 - Xu et al., [FAST-LIO2: Fast Direct LiDAR-Inertial Odometry](https://arxiv.org/abs/2107.06829).

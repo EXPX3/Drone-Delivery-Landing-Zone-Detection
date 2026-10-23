@@ -87,6 +87,8 @@ def main() -> int:
                         default=root / "pcds/bag_only_kiss_icp_surfels_10cm.json")
     parser.add_argument("--voxel-size", type=float, default=0.10)
     parser.add_argument("--minimum-normal-observations", type=int, default=5)
+    parser.add_argument("--minimum-output-observations", type=int, default=1,
+                        help="Discard cells supported by fewer observations")
     args = parser.parse_args()
 
     points = np.asarray(binary_pcd_xyz(args.input), dtype=np.float64)
@@ -103,18 +105,24 @@ def main() -> int:
         block_normals[block_normals[:, 2] < 0.0] *= -1.0
         normals[selected] = block_normals
         normal_std[selected] = np.sqrt(np.maximum(eigenvalues[:, 0], 0.0))
-    write_surfel_pcd(args.output, means, covariance, normals, normal_std, counts)
+    output_keep = counts >= args.minimum_output_observations
+    write_surfel_pcd(
+        args.output, means[output_keep], covariance[output_keep], normals[output_keep],
+        normal_std[output_keep], counts[output_keep],
+    )
     result = {
         "method": "probabilistic voxel surfel fusion",
         "uses_bayern_reference": False,
         "input_points": len(points),
         "surfel_count": len(means),
+        "output_surfel_count": int(np.count_nonzero(output_keep)),
         "voxel_size_m": args.voxel_size,
+        "minimum_output_observations": args.minimum_output_observations,
         "surfels_with_normals": int(np.count_nonzero(valid)),
         "observation_count": {
-            "median": float(np.median(counts)),
-            "p95": float(np.percentile(counts, 95)),
-            "maximum": int(np.max(counts)),
+            "median": float(np.median(counts[output_keep])),
+            "p95": float(np.percentile(counts[output_keep], 95)),
+            "maximum": int(np.max(counts[output_keep])),
         },
         "normal_std_m": {
             "median": float(np.nanmedian(normal_std)),

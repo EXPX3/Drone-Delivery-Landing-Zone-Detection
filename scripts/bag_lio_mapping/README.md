@@ -101,6 +101,21 @@ surface normal, and normal-direction standard deviation. Cells with fewer than f
 observations remain in the PCD to preserve sparse small objects, but receive no
 fabricated normal. The direct reconstructed PCD remains the master artifact.
 
+Generate a smoother inspection product that merges nearby layers into 20 cm cells
+and keeps only cells observed at least three times:
+
+```bash
+/home/gvb/Documents/robotspace/venvs/ddlzd_mapping/bin/python \
+  scripts/bag_lio_mapping/fuse_surfel_map.py \
+  --voxel-size 0.20 --minimum-output-observations 3 \
+  --output pcds/bag_only_kiss_icp_supported_surfels_20cm.pcd \
+  --diagnostics pcds/bag_only_kiss_icp_supported_surfels_20cm.json
+```
+
+This is a statistically supported visualization/map product. It suppresses isolated
+noise but can also remove small or transient objects that were observed fewer than
+three times; it does not repair trajectory misregistration.
+
 Visualize either output:
 
 ```bash
