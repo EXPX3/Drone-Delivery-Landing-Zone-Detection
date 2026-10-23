@@ -74,7 +74,7 @@ The horizontal UTM-to-bag-map fit uses 2,022 synchronized GNSS/TF pairs and has
 cloud supplies the remaining live-LiDAR correction:
 
 ```text
-translation:  [ 0.007155, -0.107244, -1.638995 ] m
+translation:  [ 0.107891, -0.092773, 2.272681 ] m
 roll/pitch/yaw: approximately [ -0.211, 1.475, 0.036 ] degrees
 median residual: 0.2443 m
 75th percentile residual: 0.3177 m
@@ -85,6 +85,14 @@ The correction is stored under `registration.live_lidar_to_static` in
 3D median after map-to-orthometric conversion. The RViz display origin separately
 keeps Z at zero so native elevations remain visible; it must not be used as the ICP
 rotation pivot.
+
+The bag starts and ends with the UAV grounded. Comparing all 12,132 GNSS samples
+with the Bayern ground cloud showed that the former 45.0 m ellipsoid-to-DHHN
+estimate left the minimum trajectory point 3.913 m above terrain. The configured
+vertical offset is therefore 48.913 m. At the first camera frame, the GPS trajectory
+is 0.411 m above terrain and the TF `base_link` is 0.258 m above terrain, consistent
+with the body/GNSS reference point of a grounded UAV. The stored ICP translation was
+re-expressed for this datum change, so static/live point-cloud alignment is unchanged.
 
 ## Configuration
 
@@ -111,7 +119,7 @@ zone_visual_lift_m: 0.65
   -m unittest discover -s scripts/tests -v
 ```
 
-Expected result: 16 tests pass.
+Expected result: 17 tests pass.
 
 ## Synchronization Evidence
 

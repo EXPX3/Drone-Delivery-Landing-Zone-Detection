@@ -5,7 +5,7 @@ calibration:
     - Intrinsics came from the CargoPack camera code at 1920x1080.
     - Recorded 1280x720 images are treated as full-frame 2/3 resizes.
     - Camera is modeled as a rigid nadir mount; UAV attitude supplies roll, pitch, and heading.
-    - Vertical datum offset is an initial Munich geoid-scale estimate and must be surveyed.
+    - Vertical datum offset is constrained by the grounded interval in this bag.
 
 topics:
   image: /GremsyVIO/image/cpu
@@ -57,14 +57,18 @@ camera:
 registration:
   minimum_trajectory_baseline_m: 10.0
   maximum_horizontal_rmse_m: 5.0
-  # Added to Bayern LiDAR/DHHN heights before mapping through GNSS altitude.
-  lz_to_gnss_vertical_offset_m: 45.0
+  # Ellipsoidal GNSS minus Bayern LiDAR/DHHN height. The value is calibrated so
+  # the minimum recorded altitude during the known grounded interval meets the
+  # local ground surface (45.0 m left the vehicle 3.913 m above the terrain).
+  lz_to_gnss_vertical_offset_m: 48.913
   # ICP fit of 240 registered Velodyne frames against the Bayern static cloud.
   # Applied around the static-cloud origin after map -> orthometric conversion.
   live_lidar_to_static:
     method: robust_point_to_point_icp
     sample_frames: 240
-    translation_m: [0.007155, -0.107244, -1.638995]
+    # Translation re-expressed for the 48.913 m vertical datum while preserving
+    # the previously fitted point positions and rotation.
+    translation_m: [0.107891, -0.092773, 2.272681]
     quaternion_xyzw: [-0.001844951, 0.012873635, 0.000334794, 0.999915373]
     median_residual_m: 0.2443
     p75_residual_m: 0.3177
