@@ -20,7 +20,9 @@ from lz_camera_projection import (  # noqa: E402
     zone_ring,
 )
 from project_lz_into_bag_camera import draw_zones  # noqa: E402
-from lz_bag_replay_viewer.replay_server import displayed_zone_ring, frustum_visible_ranks  # noqa: E402
+from lz_bag_replay_viewer.replay_server import (  # noqa: E402
+    camera_footprint, displayed_zone_ring, frustum_visible_ranks,
+)
 
 
 class ProjectionGeometryTests(unittest.TestCase):
@@ -64,6 +66,22 @@ class ProjectionGeometryTests(unittest.TestCase):
         pixels, visible = project_optical_points(np.array([[0.0, 0.0, 10.0]]), scaled, np.zeros(5))
         np.testing.assert_allclose(pixels[0], [640.0, 360.0], atol=1e-8)
         self.assertTrue(visible[0])
+
+    def test_terrain_footprint_reprojects_to_image_corners(self):
+        optical_to_world = Transform(
+            np.array([0.0, 0.0, 10.0]), np.array([1.0, 0.0, 0.0, 0.0])
+        )
+        matrix = np.array([[100.0, 0.0, 100.0], [0.0, 100.0, 100.0], [0.0, 0.0, 1.0]])
+        footprint, _ = camera_footprint(
+            optical_to_world, matrix, np.zeros(5), 200, 200, 0.0,
+            terrain_height=lambda x, _y: 0.05 * x,
+        )
+        optical = transform_points(optical_to_world.inverse(), np.asarray(footprint[:-1]))
+        pixels, visible = project_optical_points(optical, matrix, np.zeros(5))
+        expected = np.array([[0.0, 0.0], [199.0, 0.0], [199.0, 199.0], [0.0, 199.0]])
+        np.testing.assert_allclose(pixels, expected, atol=1e-7)
+        self.assertTrue(np.all(visible))
+        self.assertGreater(np.ptp(np.asarray(footprint)[:, 2]), 0.5)
 
     def test_zone_ring_uses_surface_normal(self):
         zone = {

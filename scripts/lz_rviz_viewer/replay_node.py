@@ -29,7 +29,7 @@ from lz_bag_replay_viewer.replay_server import (  # noqa: E402
 )
 from lz_camera_projection import compose, load_landing_zones, scaled_camera_matrix, transform_points  # noqa: E402
 from lz_rviz_viewer.dynamic_occupancy import (  # noqa: E402
-    DynamicOccupancyMap, interpolate_gps, pointcloud2_xyz,
+    DynamicOccupancyMap, interpolate_gps, pointcloud2_xyz, TerrainHeightModel,
 )
 from project_lz_into_bag_camera import (  # noqa: E402
     chain_transform, config_transform, decode_image, draw_zones, fit_utm_to_map,
@@ -122,6 +122,8 @@ class LandingZoneRvizReplay(Node):
             self.config = yaml.safe_load(handle)
         self.zones = load_landing_zones(args.zones, None, 0)
         full_cloud = read_ascii_pcd(args.pcd, 0)
+        ground_cloud = read_ascii_pcd(args.ground_pcd, 0)
+        self.terrain = TerrainHeightModel(ground_cloud)
         cloud = full_cloud
         if len(cloud) > args.max_points:
             indices = np.random.default_rng(17).choice(len(cloud), args.max_points, replace=False)
@@ -388,6 +390,7 @@ class LandingZoneRvizReplay(Node):
                     trajectory.append(uav)
                 footprint, _ = camera_footprint(
                     ortho_to_optical, camera_matrix, distortion, frame.shape[1], frame.shape[0], ground_z,
+                    terrain_height=self.terrain.height,
                 )
                 frame_number += 1
                 relative = (timestamp - first_stamp) / 1e9
@@ -423,6 +426,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bag", type=Path, required=True)
     parser.add_argument("--pcd", type=Path, default=root / "pcds/696_5328_cropped_by_bayernatlas_20260812084517.pcd")
+    parser.add_argument("--ground-pcd", type=Path, default=root / "pcds/696_5328_cropped_ground_only.pcd")
     parser.add_argument("--zones", type=Path, default=root / "pcds/region_growing_landing_zones_max10000_radius2_5_to3_risk_ranked.csv")
     parser.add_argument("--config", type=Path, default=root / "scripts/config/lz_camera_projection.yaml")
     parser.add_argument("--max-points", type=int, default=250000)

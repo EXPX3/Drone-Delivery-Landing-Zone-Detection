@@ -7,6 +7,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 
 import numpy as np
+from scipy.spatial import cKDTree
 
 
 def interpolate_gps(gps: list[tuple[int, float, float, float]], timestamp_ns: int,
@@ -55,6 +56,27 @@ def unique_rows(values: np.ndarray) -> np.ndarray:
     if len(values) == 0:
         return values
     return np.unique(values, axis=0)
+
+
+class TerrainHeightModel:
+    """Robust local ground elevation from a classified ground point cloud."""
+
+    def __init__(self, ground_points: np.ndarray, neighbors: int = 12) -> None:
+        points = np.asarray(ground_points, dtype=np.float64)
+        if len(points) < neighbors:
+            raise ValueError("Ground model has too few points")
+        self.points = points
+        self.neighbors = int(neighbors)
+        self.tree = cKDTree(points[:, :2])
+
+    def height(self, x: float, y: float, maximum_distance_m: float = 4.0) -> float | None:
+        distances, indices = self.tree.query([x, y], k=self.neighbors)
+        distances = np.atleast_1d(distances)
+        indices = np.atleast_1d(indices)
+        keep = np.isfinite(distances) & (distances <= maximum_distance_m)
+        if np.count_nonzero(keep) < 3:
+            return None
+        return float(np.median(self.points[indices[keep], 2]))
 
 
 @dataclass

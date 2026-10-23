@@ -54,6 +54,12 @@ connects the GNSS UAV position to the TF-derived base position, and the image st
 reports the current horizontal `GNSS/TF` residual. The frame number and ROS timestamp
 shown above the UAV are identical to those burned into the camera image.
 
+Frustum corner rays are intersected iteratively with the classified Bayern ground
+cloud, not a single flat elevation. Each resulting 3D corner is verified to reproject
+to the corresponding camera-image corner under the same intrinsic/distortion model.
+If identifiable image features still disagree with the footprint, the remaining
+source is the provisional camera calibration rather than timestamp or ray geometry.
+
 Voxel color follows altitude: blue at low elevations through cyan and yellow to red
 at high elevations. Landing-zone rings have a 0.65 m RViz-only visual lift so voxel
 faces do not hide them. Detection and camera projection retain the actual surface Z.
@@ -103,7 +109,7 @@ zone_visual_lift_m: 0.65
   -m unittest discover -s scripts/tests -v
 ```
 
-Expected result: 15 tests pass.
+Expected result: 16 tests pass.
 
 ## Synchronization Evidence
 

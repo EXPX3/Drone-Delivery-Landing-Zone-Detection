@@ -56,7 +56,8 @@ def displayed_zone_ring(zone: dict, samples: int = 48) -> np.ndarray:
 
 
 def camera_footprint(ortho_to_optical: Transform, camera_matrix: np.ndarray, distortion: np.ndarray,
-                     width: int, height: int, ground_z: float) -> tuple[list[list[float]], dict[str, list[float]]]:
+                     width: int, height: int, ground_z: float,
+                     terrain_height=None) -> tuple[list[list[float]], dict[str, list[float]]]:
     camera = ortho_to_optical.translation
     corners = np.array([[0.0, 0.0], [width - 1.0, 0.0],
                         [width - 1.0, height - 1.0], [0.0, height - 1.0]], dtype=np.float64)
@@ -68,6 +69,13 @@ def camera_footprint(ortho_to_optical: Transform, camera_matrix: np.ndarray, dis
         if ray[2] >= -1e-6:
             return [], {"x": [], "y": [], "z": []}
         scale = (ground_z - camera[2]) / ray[2]
+        if terrain_height is not None:
+            for _ in range(4):
+                estimate = camera + scale * ray
+                local_ground = terrain_height(float(estimate[0]), float(estimate[1]))
+                if local_ground is None:
+                    break
+                scale = (local_ground - camera[2]) / ray[2]
         footprint.append((camera + scale * ray).tolist())
     closed = footprint + [footprint[0]]
     frustum_x: list[float | None] = []
