@@ -42,3 +42,15 @@ camera frustum, footprint, and pink visible-zone layer update during replay.
 The first launch still scans the bag to reconstruct TF/GNSS registration. Once replay
 starts, rendering is native RViz/Ogre and avoids Plotly, HTTP polling, JPEG encoding,
 and browser-side point-cloud redraws.
+
+Display a standalone local-frame PCD with the mapping-audit RViz configuration:
+
+```bash
+scripts/lz_rviz_viewer/run_mapping_audit_viewer.sh \
+  pcds/bag_only_deskewed_map.pcd
+```
+
+Standalone mode uses local `(0, 0)` as the 100 m ROI center, derives the RViz
+floating-point origin from the cloud, and deterministically displays at most one
+million points. Calling the launcher without an argument retains the original
+four-layer Bayern-assisted audit view.

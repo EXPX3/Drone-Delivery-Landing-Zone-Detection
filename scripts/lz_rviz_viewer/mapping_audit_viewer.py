@@ -97,6 +97,37 @@ def crop_xy(fields: list[str], values: np.ndarray, center: np.ndarray, radius: f
 class AuditPublisher(Node):
     def __init__(self, args: argparse.Namespace) -> None:
         super().__init__("ddlzd_mapping_audit_viewer")
+        if args.standalone is not None:
+            direct_fields, direct = read_pcd(args.standalone)
+            direct_xyz = direct[:, [direct_fields.index(name) for name in ("x", "y", "z")]]
+            self.origin = np.median(direct_xyz, axis=0)
+            direct = crop_xy(
+                direct_fields, direct, np.array([args.center_x, args.center_y]), args.radius,
+            )
+            if len(direct) > args.maximum_direct_points:
+                index = np.random.default_rng(31).choice(
+                    len(direct), args.maximum_direct_points, replace=False,
+                )
+                direct = direct[index]
+            qos = QoSProfile(
+                history=HistoryPolicy.KEEP_LAST, depth=1,
+                reliability=ReliabilityPolicy.RELIABLE,
+                durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            )
+            publisher = self.create_publisher(PointCloud2, "/ddlzd/audit/direct_pointcloud", qos)
+            message = cloud_message(direct_fields, direct, self.origin)
+            publisher.publish(message)
+            self._layer_publishers = [publisher]
+            self._layer_messages = [message]
+            self.get_logger().info(
+                f"Published {len(direct)} standalone points from {args.standalone}"
+            )
+            self.get_logger().info(
+                f"Local origin: {self.origin[0]:.3f}, {self.origin[1]:.3f}, "
+                f"{self.origin[2]:.3f}; ROI center: {args.center_x:.3f}, "
+                f"{args.center_y:.3f}, radius {args.radius:.1f} m"
+            )
+            return
         reference_fields, reference = read_pcd(args.reference)
         direct_fields, direct = read_pcd(args.direct)
         ground_fields, ground = read_pcd(args.ground)
@@ -141,6 +172,8 @@ class AuditPublisher(Node):
 def main() -> int:
     root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--standalone", type=Path,
+                        help="Display one local-frame PCD without loading audit reference layers")
     parser.add_argument("--reference", type=Path,
                         default=root / "pcds/696_5328_cropped_ground_only.pcd")
     parser.add_argument("--ground", type=Path,
@@ -150,13 +183,18 @@ def main() -> int:
     parser.add_argument("--changes", type=Path,
                         default=root / "pcds/lidar_mapping_accuracy/change_only_obstacles.pcd")
     parser.add_argument("--maximum-reference-points", type=int, default=250000)
-    parser.add_argument("--center-x", type=float, default=696496.704718,
-                        help="UTM center easting; default is the grounded bag start")
-    parser.add_argument("--center-y", type=float, default=5328128.7768,
-                        help="UTM center northing; default is the grounded bag start")
+    parser.add_argument("--maximum-direct-points", type=int, default=1000000)
+    parser.add_argument("--center-x", type=float,
+                        help="ROI center X; defaults to zero for standalone or grounded UTM start")
+    parser.add_argument("--center-y", type=float,
+                        help="ROI center Y; defaults to zero for standalone or grounded UTM start")
     parser.add_argument("--radius", type=float, default=100.0,
                         help="Display radius in metres; use 0 for the complete map")
     args = parser.parse_args()
+    if args.center_x is None:
+        args.center_x = 0.0 if args.standalone is not None else 696496.704718
+    if args.center_y is None:
+        args.center_y = 0.0 if args.standalone is not None else 5328128.7768
     rclpy.init()
     node = AuditPublisher(args)
     try:
