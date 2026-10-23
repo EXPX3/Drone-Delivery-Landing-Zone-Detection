@@ -102,9 +102,9 @@ The direct-return layer uses a fixed local-height gradient from blue near the gr
 through yellow to red at 3 m and above. Fixed bounds keep person, box, and car heights
 visually distinct even when tall trees are present.
 
-The viewer defaults to an exact, non-downsampled 5 m radius around the grounded bag
-start (`696496.705, 5328128.777` UTM). This retains about 1.26 million individual
-returns and the nearby person/box-height changes while keeping RViz interactive.
+The viewer defaults to an exact, non-downsampled 25 m radius around the grounded bag
+start (`696496.705, 5328128.777` UTM), retaining individual returns and nearby
+person/box/car-height changes without voxelization.
 Pass `--radius 0` to `mapping_audit_viewer.py` for the complete eight-million-point map.
 
 For a definitive vibration test, record the LiDAR packet firing times and a rigidly
