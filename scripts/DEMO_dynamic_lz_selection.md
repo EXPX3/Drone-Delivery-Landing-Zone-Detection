@@ -35,7 +35,7 @@ Two octree-style depths reduce update and rendering cost:
 - Above-ground points are clustered within `0.25 m`; isolated returns are rejected.
 - Five points are required below 10 m range, four below 20 m, and three beyond it.
 - A hazard must occur in two of three scans; points beyond 40 m require three hits.
-- Point stride three, batched voxel uniqueness, spatial candidate indexing, 2 Hz map
+- Point stride three, batched voxel uniqueness, spatial candidate indexing, 5 Hz live-delta
   publication and 5 Hz zone publication bound processing while keeping visible
   candidate-state latency below approximately 0.3 s.
 
@@ -134,7 +134,8 @@ confirmation_window_scans: 3
 maximum_lidar_range_m: 80.0
 rolling_horizontal_radius_m: 10.0
 point_stride: 3
-publish_hz: 2.0
+publish_hz: 5.0
+max_visualized_voxels: 20000
 zone_publish_hz: 5.0
 gps_wind_margin_m: 2.0
 obstacle_min_height_m: 0.15

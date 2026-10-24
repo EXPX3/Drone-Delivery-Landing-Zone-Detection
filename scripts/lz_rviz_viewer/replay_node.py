@@ -429,7 +429,7 @@ class LandingZoneRvizReplay(Node):
                     if (last_occupancy_publish is None
                             or timestamp - last_occupancy_publish >= occupancy_interval_ns):
                         self.occupancy_pub.publish(self.occupancy_markers(
-                            timestamp, include_baseline=True, center=lidar_origin,
+                            timestamp, include_baseline=False, center=lidar_origin,
                             radius_m=rolling_radius,
                         ))
                         last_occupancy_publish = timestamp
