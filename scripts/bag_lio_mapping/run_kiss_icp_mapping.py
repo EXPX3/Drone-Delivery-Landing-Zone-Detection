@@ -61,6 +61,46 @@ def odometry_trajectory(bag: Path, topic: str) -> tuple[np.ndarray, np.ndarray]:
     return np.asarray(times), np.asarray(poses)
 
 
+def scalar_topic(bag: Path, topic: str, field: str) -> tuple[np.ndarray, np.ndarray]:
+    times: list[float] = []
+    values: list[float] = []
+    with AnyReader([bag]) as reader:
+        connections = [item for item in reader.connections if item.topic == topic]
+        if len(connections) != 1:
+            raise RuntimeError(f"Expected one connection for {topic}, found {len(connections)}")
+        for _, timestamp_ns, raw in reader.messages(connections=connections):
+            message = reader.deserialize(raw, connections[0].msgtype)
+            times.append(timestamp_ns * 1e-9)
+            values.append(float(getattr(message, field)))
+    return np.asarray(times), np.asarray(values)
+
+
+def calibrate_vertical_scale(odom_times: np.ndarray, odom_poses: np.ndarray,
+                             gnss_times: np.ndarray, gnss_altitude: np.ndarray,
+                             settings: dict) -> tuple[np.ndarray, float]:
+    poses = odom_poses.copy()
+    reference_count = int(settings["ground_reference_samples"])
+    odom_reference = float(np.median(poses[:reference_count, 2, 3]))
+    gnss_at_odom = np.interp(odom_times, gnss_times, gnss_altitude)
+    gnss_reference = float(np.median(gnss_at_odom[:reference_count]))
+    odom_relative = poses[:, 2, 3] - odom_reference
+    gnss_relative = gnss_at_odom - gnss_reference
+    valid = (
+        (odom_relative >= float(settings["minimum_climb_m"]))
+        & np.isfinite(gnss_relative)
+    )
+    ratios = gnss_relative[valid] / odom_relative[valid]
+    ratios = ratios[
+        (ratios >= float(settings["minimum_ratio"]))
+        & (ratios <= float(settings["maximum_ratio"]))
+    ]
+    if len(ratios) < 20:
+        raise RuntimeError("Insufficient valid raw-GNSS samples for vertical scale calibration")
+    scale = float(np.median(ratios))
+    poses[:, 2, 3] = odom_reference + scale * odom_relative
+    return poses, scale
+
+
 def interpolate_odometry(times: np.ndarray, poses: np.ndarray, timestamp: float) -> np.ndarray:
     right = int(np.searchsorted(times, timestamp, side="left"))
     right = min(max(right, 1), len(times) - 1)
@@ -153,6 +193,16 @@ def main() -> int:
     config.adaptive_threshold.min_motion_th = float(threshold["minimum_motion_m"])
     mapper = KissICP(config)
     odom_times, odom_poses = odometry_trajectory(args.bag, settings["data"]["odometry_topic"])
+    vertical_scale = 1.0
+    scale_settings = settings["vertical_scale_calibration"]
+    if bool(scale_settings["enabled"]):
+        gnss_times, gnss_altitude = scalar_topic(
+            args.bag, settings["data"]["raw_gnss_topic"], "altitude",
+        )
+        odom_poses, vertical_scale = calibrate_vertical_scale(
+            odom_times, odom_poses, gnss_times, gnss_altitude, scale_settings,
+        )
+        print(f"Bag-only raw-GNSS vertical scale: {vertical_scale:.9f}", flush=True)
 
     extrinsic = settings["extrinsic_base_from_lidar"]
     rotation = quaternion_matrix(extrinsic["quaternion_xyzw"])
@@ -244,6 +294,7 @@ def main() -> int:
         "uses_bayern_reference": False,
         "uses_imu": False,
         "uses_onboard_odometry_prior": True,
+        "vertical_scale_from_raw_gnss": vertical_scale,
         "deskew_enabled": config.data.deskew,
         "scans": len(poses),
         "reconstructed_points": writer.count,

@@ -176,8 +176,43 @@ A separate supported-surface product uses 20 cm voxels and requires at least thr
 observations. It retains 484,843 surfels, including 342,096 cells with valid normals,
 and is intended for cleaner visual inspection. This product can suppress isolated
 returns and merge nearby layers, but it can also remove sparsely observed small or
-transient objects. Repeated vertical errors remain possible and must ultimately be
-addressed in trajectory/extrinsic optimization.
+transient objects.
+
+## Final bag-only vertical optimization
+
+Controlled evidence localized the dominant defect to trajectory height rather than
+raw LiDAR precision. Across the first 100 grounded scans, individual plane RMSE has
+a `0.0116 m` median, fitted-plane offsets span only `0.0410 m`, and normals span
+`0.109 deg`. During flight, however, held-out ground bias correlates `0.728` with
+onboard altitude and reaches approximately `1.44 m`. The return to the launch area
+provides an independent LiDAR loop closure of approximately `0.417 m` vertically.
+
+The production correction is bag-only. Raw GNSS relative altitude establishes a
+vertical scale of `0.94036`; endpoint GICP distributes the measured loop residual;
+then a robust sparse bundle jointly estimates per-scan vertical offsets and terrain
+heights from 3,141,850 low-surface observations in 45,991 cells seen by at least four
+scans. Temporal second-difference regularization and the first/last 100 grounded
+scans constrain the solution. No Bayern point enters this optimization.
+
+After freezing the trajectory, scan-indexed held-out evaluation registers horizontal
+coordinates using onboard GNSS only and uses Bayern solely for ground residuals. For
+all 3,436 scans, vertical bias RMSE is `0.0583 m`, NMAD is `0.0313 m`, and P95
+absolute bias is `0.1271 m`. The preceding loop-only result was `0.4036 m` RMSE and
+`0.3452 m` NMAD. Median within-scan ground NMAD remains `0.0951 m`, which captures
+beam noise, vegetation, correspondence error, and residual roll/pitch/extrinsic error.
+
+The final direct reconstruction contains 8,006,176 points. Its recommended smooth
+inspection product uses 10 cm cells with at least two observations and contains
+948,195 surfels; median support is four returns, and covariance-derived normal spread
+has a `0.0161 m` median and `0.0241 m` P95. This fusion follows trajectory correction
+and does not conceal registration errors. The direct reconstruction remains the
+master artifact so boxes, the person, the car, and other sparse changes are retained.
+
+This result supports a reliable decimetre-class relative surface map for this bag; it
+does not establish survey-grade absolute accuracy. The remaining `0.095 m` within-scan
+ground spread cannot be safely removed by vertical strip fitting. A defensible next
+improvement would require calibrated roll/pitch and LiDAR-body extrinsics with a
+higher-rate IMU or surveyed control, followed by point-to-plane evaluation.
 
 ## Technical references
 

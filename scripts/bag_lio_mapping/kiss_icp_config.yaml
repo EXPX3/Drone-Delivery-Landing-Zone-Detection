@@ -1,8 +1,15 @@
 data:
   odometry_topic: /mavros/local_position/odom
+  raw_gnss_topic: /mavros/global_position/raw/fix
   min_range_m: 1.0
   max_range_m: 80.0
   deskew: true
+vertical_scale_calibration:
+  enabled: true
+  minimum_climb_m: 3.0
+  minimum_ratio: 0.8
+  maximum_ratio: 1.1
+  ground_reference_samples: 100
 registration:
   max_num_iterations: 100
   convergence_criterion: 0.0001
@@ -20,6 +27,12 @@ innovation_gate:
   correction_smoothing_alpha: 0.05
 reconstruction:
   point_stride: 4
+loop_closure:
+  endpoint_scans: 100
+  scan_stride: 3
+  point_stride: 2
+  downsampling_resolution_m: 0.15
+  maximum_correspondence_m: 0.75
 extrinsic_base_from_lidar:
   # Recorded TF chain: base_link -> altax_center_flu -> velodyne.
   translation_m: [0.13, -0.145, -0.11]

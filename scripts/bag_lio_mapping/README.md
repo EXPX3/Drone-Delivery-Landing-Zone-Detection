@@ -142,6 +142,70 @@ not an absolute-error metric; nevertheless, it does **not** demonstrate improved
 sharpness. The surfel's 0.0127 m within-cell statistic must not be confused with
 whole-map registration accuracy.
 
-The next stage is global pose-graph optimization with loop closure and GNSS factors,
-followed by another reconstruction from the globally optimized poses. Bayern remains
-held out until that map is frozen and evaluated.
+## Recommended strip-optimized map
+
+The flight data contains a smooth, altitude-correlated vertical trajectory error.
+Individual grounded scans are sharp, but their surfaces separate as the vehicle
+climbs. The final implemented stage corrects this without consulting Bayern data:
+
+1. calibrate local vertical scale from the independent raw-GNSS altitude stream;
+2. register LiDAR scans conservatively with KISS-ICP and onboard odometry;
+3. estimate the start/end LiDAR loop closure;
+4. bundle-adjust one vertical offset per scan from repeated low-surface observations;
+5. reconstruct every scan using point timestamps and the corrected trajectory;
+6. fuse repeat-supported observations into 10 cm probabilistic surfels.
+
+Run stages 3 through 6 after the full `run_kiss_icp_mapping.py` command above:
+
+```bash
+PY=/home/gvb/Documents/robotspace/venvs/ddlzd_mapping/bin/python
+BAG=/media/gvb/ssd24ubuntu2/bags/Bagfilles_Feb13_2026/recovered_bag
+
+$PY scripts/bag_lio_mapping/optimize_loop_closure.py --bag "$BAG"
+$PY scripts/bag_lio_mapping/optimize_vertical_strips.py --bag "$BAG"
+$PY scripts/bag_lio_mapping/reconstruct_from_poses.py \
+  --bag "$BAG" \
+  --poses pcds/bag_only_strip_optimized_poses.npz \
+  --output pcds/bag_only_strip_optimized_reconstructed.pcd \
+  --diagnostics pcds/bag_only_strip_optimized_reconstruction.json
+$PY scripts/bag_lio_mapping/fuse_surfel_map.py \
+  --input pcds/bag_only_strip_optimized_reconstructed.pcd \
+  --output pcds/bag_only_strip_optimized_surfels_10cm_min2.pcd \
+  --diagnostics pcds/bag_only_strip_optimized_surfels_10cm_min2.json \
+  --voxel-size 0.10 --minimum-output-observations 2
+```
+
+Inspect the smooth repeat-supported map:
+
+```bash
+scripts/lz_rviz_viewer/run_mapping_audit_viewer.sh \
+  pcds/bag_only_strip_optimized_surfels_10cm_min2.pcd
+```
+
+Use `bag_only_strip_optimized_reconstructed.pcd` when sparse or transient details
+must be retained. The surfel map removes isolated observations and is the recommended
+visual/static-surface product; it is not a substitute for the master reconstruction.
+
+### Held-out validation
+
+Freeze the bag-only poses before running this command. The reference is used only to
+score the result, never by any optimization stage:
+
+```bash
+$PY scripts/bag_lio_mapping/evaluate_scan_alignment.py \
+  --bag "$BAG" \
+  --poses pcds/bag_only_strip_optimized_poses.npz \
+  --csv pcds/bag_only_strip_scan_alignment.csv \
+  --diagnostics pcds/bag_only_strip_scan_alignment.json
+```
+
+All 3,436 scans were evaluated. Per-scan vertical bias against the held-out Bayern
+ground has `0.0583 m` RMSE, `0.0313 m` NMAD and `0.1271 m` P95 absolute error. The
+previous loop-only trajectory measured `0.4036 m` RMSE and `0.3452 m` NMAD. Median
+within-scan ground NMAD is `0.0951 m`; correcting further requires attitude/extrinsic
+calibration and higher-rate inertial evidence, not stronger cosmetic fusion.
+
+The 10 cm, minimum-two-observation map contains 948,195 surfels. Its median support
+is four returns and median normal-direction standard deviation is `0.0161 m`. This
+resolution retains substantially more small-object detail than the earlier 20 cm,
+three-observation display product.
