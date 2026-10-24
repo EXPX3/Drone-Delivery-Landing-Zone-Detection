@@ -135,7 +135,7 @@ point_stride: 3
 publish_hz: 2.0
 zone_publish_hz: 1.0
 gps_wind_margin_m: 2.0
-obstacle_min_height_m: 0.20
+obstacle_min_height_m: 0.15
 vertical_clearance_m: 5.0
 point_clustering:
   enabled: true

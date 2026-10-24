@@ -165,10 +165,10 @@ class DynamicOccupancyMap:
         interest = self._interest_mask(points)
         keys = unique_rows(voxel_keys(points[interest], self.resolution))
         hazard_points = self._clustered_hazard_points(points[interest], sensor_origin)
-        hazard_keys = {
-            tuple(int(value) for value in row)
-            for row in unique_rows(voxel_keys(hazard_points, self.resolution))
-        }
+        hazard_positions: dict[tuple[int, int, int], list[np.ndarray]] = defaultdict(list)
+        for point, row in zip(hazard_points, voxel_keys(hazard_points, self.resolution)):
+            hazard_positions[tuple(int(value) for value in row)].append(point)
+        hazard_keys = set(hazard_positions)
         coarse_keys = unique_rows(voxel_keys(points[~interest], self.coarse_resolution))
         for row in coarse_keys:
             key = tuple(int(v) for v in row)
@@ -178,20 +178,30 @@ class DynamicOccupancyMap:
             key = tuple(int(v) for v in row)
             hits = self.live_hits.get(key, 0) + 1
             self.live_hits[key] = hits
-            if key not in hazard_keys or key in self.baseline_keys or key in self.confirmed_hazards:
+            if key not in hazard_keys or key in self.confirmed_hazards:
                 continue
-            observations = self.hazard_observations[key]
-            observations.append(self.scan_index)
             cutoff = self.scan_index - self.confirmation_window_scans + 1
+            nearby_scans: set[int] = {self.scan_index}
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    for dz in (-1, 0, 1):
+                        neighbor = (key[0] + dx, key[1] + dy, key[2] + dz)
+                        nearby_scans.update(
+                            value for value in self.hazard_observations.get(neighbor, [])
+                            if value >= cutoff
+                        )
+            observations = self.hazard_observations[key]
+            if not observations or observations[-1] != self.scan_index:
+                observations.append(self.scan_index)
             while observations and observations[0] < cutoff:
                 observations.pop(0)
-            center = (np.asarray(key, dtype=np.float64) + 0.5) * self.resolution
+            center = np.mean(hazard_positions[key], axis=0)
             required_hits = self.min_obstacle_voxels
             if sensor_origin is not None:
                 distance_to_sensor = float(np.linalg.norm(center[:2] - np.asarray(sensor_origin)[:2]))
                 if distance_to_sensor > float(self.clustering.get("far_range_m", np.inf)):
                     required_hits = int(self.clustering.get("beyond_far_confirmation_hits", required_hits))
-            if len(observations) < required_hits:
+            if len(nearby_scans) < required_hits:
                 continue
             self.confirmed_hazards.add(key)
             changed += 1

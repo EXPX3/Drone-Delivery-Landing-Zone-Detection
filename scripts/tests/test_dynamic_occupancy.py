@@ -82,7 +82,7 @@ class DynamicOccupancyTests(unittest.TestCase):
         self.assertEqual(active[0]["dynamic_state"], "margin")
 
     def test_baseline_voxel_does_not_create_dynamic_obstacle(self):
-        point = np.array([[1.0, 0.0, 11.0]])
+        point = np.array([[1.0, 0.0, 10.0]])
         occupancy = DynamicOccupancyMap(
             point, [zone()], resolution=0.5,
             obstacle_min_height_m=0.25, min_obstacle_voxels=1,
@@ -176,6 +176,25 @@ class DynamicOccupancyTests(unittest.TestCase):
         )
         occupancy.update(np.array([[1.0, 0.0, 10.5], [1.8, 0.0, 10.5]]), np.zeros(3))
         self.assertEqual(len(occupancy.classified_zones()[1]), 0)
+
+    def test_temporal_confirmation_tolerates_neighbor_voxel_jitter(self):
+        occupancy = DynamicOccupancyMap(
+            np.empty((0, 3)), [zone()], resolution=0.2, coarse_resolution=1.0,
+            obstacle_min_height_m=0.15, min_obstacle_voxels=2,
+            confirmation_window_scans=3,
+        )
+        occupancy.update(np.array([[1.19, 0.0, 10.39]]))
+        occupancy.update(np.array([[1.21, 0.0, 10.41]]))
+        self.assertEqual(len(occupancy.classified_zones()[1]), 1)
+
+    def test_confirmed_hazard_can_override_baseline_voxel(self):
+        point = np.array([[1.0, 0.0, 10.2]])
+        occupancy = DynamicOccupancyMap(
+            point, [zone()], resolution=0.2, coarse_resolution=1.0,
+            obstacle_min_height_m=0.15, min_obstacle_voxels=1,
+        )
+        occupancy.update(point)
+        self.assertEqual(len(occupancy.classified_zones()[1]), 1)
 
 
 if __name__ == "__main__":
