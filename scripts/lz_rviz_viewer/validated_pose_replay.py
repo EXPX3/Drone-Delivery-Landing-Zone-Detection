@@ -133,3 +133,35 @@ class ValidatedPoseReplay:
             raise RuntimeError("World alignment must be initialized before requesting sensor origin")
         position = self.poses[index, :3, 3]
         return self.world_from_local[:3, :3] @ position + self.world_from_local[:3, 3]
+
+    def world_body_pose(self, timestamp_ns: int) -> np.ndarray:
+        """Interpolate the optimized body pose without advancing LiDAR replay state."""
+        if self.world_from_local is None:
+            raise RuntimeError("World alignment must be initialized before requesting body pose")
+        timestamp = timestamp_ns * 1e-9
+        right = int(np.searchsorted(self.timestamps, timestamp, side="left"))
+        if right <= 0:
+            local = self.poses[0]
+        elif right >= len(self.timestamps):
+            local = self.poses[-1]
+        else:
+            left = right - 1
+            fraction = float(
+                (timestamp - self.timestamps[left])
+                / (self.timestamps[right] - self.timestamps[left])
+            )
+            local = np.eye(4)
+            local[:3, 3] = (
+                self.poses[left, :3, 3] * (1.0 - fraction)
+                + self.poses[right, :3, 3] * fraction
+            )
+            blended = (
+                self.poses[left, :3, :3] * (1.0 - fraction)
+                + self.poses[right, :3, :3] * fraction
+            )
+            u, _, vt = np.linalg.svd(blended)
+            local[:3, :3] = u @ vt
+            if np.linalg.det(local[:3, :3]) < 0.0:
+                u[:, -1] *= -1.0
+                local[:3, :3] = u @ vt
+        return self.world_from_local @ local

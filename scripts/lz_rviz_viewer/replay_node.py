@@ -28,7 +28,8 @@ from lz_bag_replay_viewer.replay_server import (  # noqa: E402
     camera_footprint, displayed_zone_ring, orthometric_from_map,
 )
 from lz_camera_projection import (  # noqa: E402
-    compose, load_landing_zones, project_optical_points, scaled_camera_matrix, transform_points,
+    compose, load_landing_zones, project_optical_points, scaled_camera_matrix,
+    transform_from_matrix, transform_points,
 )
 from lz_rviz_viewer.dynamic_occupancy import (  # noqa: E402
     apply_centered_transform, DynamicOccupancyMap, interpolate_gps, pointcloud2_xyz,
@@ -222,6 +223,7 @@ class LandingZoneRvizReplay(Node):
         self.semantic_memory = SemanticVoxelMemory(
             resolution_m=float(semantic.get("memory_resolution_m", 0.20)),
             contradiction_hits=int(semantic.get("contradiction_hits", 2)),
+            confirmation_hits=int(semantic.get("confirmation_hits", 2)),
         )
         self.cloud_pub.publish(point_cloud_message(cloud, self.origin))
         self.static_pub.publish(self.zone_markers(0))
@@ -526,6 +528,18 @@ class LandingZoneRvizReplay(Node):
                     float(self.config["synchronization"]["max_tf_gap_s"]),
                 )
                 map_to_optical = compose(map_to_mount, config_transform(self.config["camera"]["mount_to_optical"]))
+                if self.validated_replay is not None and corrected_alignment_ready:
+                    map_to_base = chain_transform(
+                        tf_data, [self.config["frames"]["map"], self.config["frames"]["base"]],
+                        timestamp, float(self.config["synchronization"]["max_tf_gap_s"]),
+                    )
+                    body_to_mount = np.linalg.inv(map_to_base.matrix) @ map_to_mount.matrix
+                    world_to_mount = self.validated_replay.world_body_pose(timestamp) @ body_to_mount
+                    ortho_to_optical = compose(
+                        transform_from_matrix(world_to_mount),
+                        config_transform(self.config["camera"]["mount_to_optical"]),
+                    )
+                    map_to_optical = compose(map_to_ortho.inverse(), ortho_to_optical)
                 semantic_result = None
                 semantic = self.config.get("semantic_segmentation", {})
                 inference_stride = int(semantic.get("inference_stride", 1))

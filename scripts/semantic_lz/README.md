@@ -35,6 +35,11 @@ erase a label. A voxel changes color only after two positive, contradictory
 classifications at that location; this avoids flicker when a person or box is
 temporarily outside the image or missed by the detector.
 
+Semantic voxels require two repeated observations before display, suppressing
+single-pass projection outliers. Camera projection uses the same strip-optimized
+body trajectory as the deskewed LiDAR map; mixing raw camera poses with optimized
+LiDAR poses previously caused repeated observations to spread into a halo.
+
 Generated weights and experiment images live under
 `pcds/semantic_experiment/` and remain outside Git.
 

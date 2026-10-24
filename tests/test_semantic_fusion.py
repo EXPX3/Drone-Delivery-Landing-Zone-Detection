@@ -29,6 +29,7 @@ class SemanticFusionTests(unittest.TestCase):
         memory = SemanticVoxelMemory(resolution_m=0.2, contradiction_hits=2)
         point = np.array([[1.01, 2.01, 3.01]])
         memory.update(point, np.array(["person"], dtype=object))
+        memory.update(point, np.array(["person"], dtype=object))
         memory.update(point, np.array(["cargo_box"], dtype=object))
         _, colors = memory.point_cloud()
         self.assertEqual(colors.tolist(), [[255, 0, 255]])

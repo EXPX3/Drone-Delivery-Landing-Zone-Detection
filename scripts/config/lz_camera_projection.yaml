@@ -116,4 +116,5 @@ semantic_segmentation:
   # labels; two positive contradictory labels in the same voxel are required.
   memory_resolution_m: 0.20
   contradiction_hits: 2
+  confirmation_hits: 2
 
