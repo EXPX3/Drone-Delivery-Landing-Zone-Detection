@@ -37,6 +37,43 @@ class SemanticResult:
     masks: np.ndarray
 
 
+class SemanticVoxelMemory:
+    """Persistent class labels with hysteresis against contradictory detections."""
+
+    def __init__(self, resolution_m: float = 0.20, contradiction_hits: int = 2) -> None:
+        self.resolution_m = float(resolution_m)
+        self.contradiction_hits = int(contradiction_hits)
+        self._labels: dict[tuple[int, int, int], str] = {}
+        self._contradictions: dict[tuple[int, int, int], tuple[str, int]] = {}
+
+    def update(self, points: np.ndarray, names: np.ndarray) -> None:
+        for point, name_value in zip(np.asarray(points), np.asarray(names, dtype=object)):
+            name = str(name_value)
+            key = tuple(np.floor(point / self.resolution_m).astype(np.int64))
+            previous = self._labels.get(key)
+            if previous is None or previous == name:
+                self._labels[key] = name
+                self._contradictions.pop(key, None)
+                continue
+            candidate, hits = self._contradictions.get(key, (name, 0))
+            hits = hits + 1 if candidate == name else 1
+            if hits >= self.contradiction_hits:
+                self._labels[key] = name
+                self._contradictions.pop(key, None)
+            else:
+                self._contradictions[key] = (name, hits)
+
+    def point_cloud(self) -> tuple[np.ndarray, np.ndarray]:
+        if not self._labels:
+            return np.empty((0, 3), dtype=np.float64), np.empty((0, 3), dtype=np.uint8)
+        keys = np.asarray(list(self._labels), dtype=np.float64)
+        points = (keys + 0.5) * self.resolution_m
+        colors = np.asarray(
+            [CLASS_COLORS_RGB[name] for name in self._labels.values()], dtype=np.uint8,
+        )
+        return points, colors
+
+
 class OpenVocabularySegmenter:
     """YOLOE promptable segmenter, loaded lazily to keep tests CPU-only."""
 

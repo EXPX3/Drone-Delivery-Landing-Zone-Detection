@@ -112,6 +112,8 @@ semantic_segmentation:
   device: 0
   inference_stride: 3
   maximum_lidar_age_s: 0.15
-  # Republish a valid classified scan at camera rate, then clear it explicitly.
-  retention_s: 1.0
+  # Persistent world-coordinate semantic memory. Missing detections do not erase
+  # labels; two positive contradictory labels in the same voxel are required.
+  memory_resolution_m: 0.20
+  contradiction_hits: 2
 

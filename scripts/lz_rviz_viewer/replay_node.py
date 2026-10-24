@@ -40,7 +40,7 @@ from project_lz_into_bag_camera import (  # noqa: E402
     open_reader, read_pose_and_gps, require_ros, stamp_ns,
 )
 from semantic_lz.semantic_fusion import (  # noqa: E402
-    CLASS_COLORS_RGB, OpenVocabularySegmenter, colorize_frame, labels_at_pixels,
+    OpenVocabularySegmenter, SemanticVoxelMemory, colorize_frame, labels_at_pixels,
 )
 
 FRAME_ID = "lz_world"
@@ -219,6 +219,10 @@ class LandingZoneRvizReplay(Node):
                 confidence=float(semantic["confidence"]),
                 image_size=int(semantic["image_size"]), device=str(semantic["device"]),
             )
+        self.semantic_memory = SemanticVoxelMemory(
+            resolution_m=float(semantic.get("memory_resolution_m", 0.20)),
+            contradiction_hits=int(semantic.get("contradiction_hits", 2)),
+        )
         self.cloud_pub.publish(point_cloud_message(cloud, self.origin))
         self.static_pub.publish(self.zone_markers(0))
         self.get_logger().info(
@@ -394,9 +398,6 @@ class LandingZoneRvizReplay(Node):
             lidar_frame_number = 0
             latest_lidar_points = np.empty((0, 3), dtype=np.float64)
             latest_lidar_stamp = 0
-            retained_semantic_points = np.empty((0, 3), dtype=np.float64)
-            retained_semantic_colors = np.empty((0, 3), dtype=np.uint8)
-            retained_semantic_stamp = 0
             pose_index = -1
             pose_time_error = 0.0
             interval_ns = int(1e9 / self.args.fps)
@@ -548,22 +549,13 @@ class LandingZoneRvizReplay(Node):
                     selected = labels > 0
                     if np.any(selected):
                         names = np.asarray(semantic_result.class_names, dtype=object)[labels[selected] - 1]
-                        colors = np.asarray([CLASS_COLORS_RGB[name] for name in names], dtype=np.uint8)
-                        retained_semantic_points = latest_lidar_points[selected]
-                        retained_semantic_colors = colors
-                        retained_semantic_stamp = timestamp
+                        self.semantic_memory.update(latest_lidar_points[selected], names)
                         semantic_counts = {
                             name: int(np.count_nonzero(names == name)) for name in set(names)
                         }
                 if semantic_result is not None:
                     frame = colorize_frame(frame, semantic_result)
-                retention_ns = int(float(semantic.get("retention_s", 1.0)) * 1e9)
-                if timestamp - retained_semantic_stamp <= retention_ns:
-                    semantic_points = retained_semantic_points
-                    semantic_colors = retained_semantic_colors
-                else:
-                    semantic_points = np.empty((0, 3), dtype=np.float64)
-                    semantic_colors = np.empty((0, 3), dtype=np.uint8)
+                semantic_points, semantic_colors = self.semantic_memory.point_cloud()
                 semantic_cloud = colored_point_cloud_message(
                     semantic_points, semantic_colors, self.origin,
                 )

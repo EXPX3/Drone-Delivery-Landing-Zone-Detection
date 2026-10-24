@@ -29,11 +29,11 @@ the geometry-based safety rejection remain independent: an unrecognized obstacle
 can still invalidate a landing zone. The semantic layer is therefore descriptive
 evidence, not a replacement for geometric collision checking.
 
-The semantic RViz layer renders classified LiDAR returns as 0.22 m spheres. The
-node republishes the latest valid semantic scan at the camera display rate for
-one second, then publishes an empty cloud to clear stale objects. This is
-intentional: the small aerial targets commonly contain only a few Velodyne
-returns, which disappear inside the dense base map as short-lived screen pixels.
+The semantic RViz layer renders classified LiDAR returns as 0.22 m spheres and
+stores them in a 0.20 m world-coordinate voxel memory. Missing detections never
+erase a label. A voxel changes color only after two positive, contradictory
+classifications at that location; this avoids flicker when a person or box is
+temporarily outside the image or missed by the detector.
 
 Generated weights and experiment images live under
 `pcds/semantic_experiment/` and remain outside Git.

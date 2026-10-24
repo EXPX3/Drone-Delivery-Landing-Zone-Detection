@@ -6,7 +6,9 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from semantic_lz.semantic_fusion import SemanticResult, canonical_class, labels_at_pixels
+from semantic_lz.semantic_fusion import (
+    SemanticResult, SemanticVoxelMemory, canonical_class, labels_at_pixels,
+)
 
 
 class SemanticFusionTests(unittest.TestCase):
@@ -22,6 +24,17 @@ class SemanticFusionTests(unittest.TestCase):
         pixels = np.array([[3.0, 4.0], [7.0, 7.0], [3.0, 4.0]])
         valid = np.array([True, True, False])
         self.assertEqual(labels_at_pixels(result, pixels, valid).tolist(), [1, 0, 0])
+
+    def test_semantic_memory_requires_confirmed_contradiction(self):
+        memory = SemanticVoxelMemory(resolution_m=0.2, contradiction_hits=2)
+        point = np.array([[1.01, 2.01, 3.01]])
+        memory.update(point, np.array(["person"], dtype=object))
+        memory.update(point, np.array(["cargo_box"], dtype=object))
+        _, colors = memory.point_cloud()
+        self.assertEqual(colors.tolist(), [[255, 0, 255]])
+        memory.update(point, np.array(["cargo_box"], dtype=object))
+        _, colors = memory.point_cloud()
+        self.assertEqual(colors.tolist(), [[255, 255, 0]])
 
 
 if __name__ == "__main__":
