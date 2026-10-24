@@ -130,6 +130,10 @@ class DynamicOccupancyMap:
         ))
         self.baseline_keys = {tuple(int(v) for v in row) for row in fine_baseline}
         self.coarse_baseline_keys = {tuple(int(v) for v in row) for row in coarse_baseline}
+        self._baseline_fine_centers = (fine_baseline.astype(np.float64) + 0.5) * self.resolution
+        self._baseline_coarse_centers = (
+            coarse_baseline.astype(np.float64) + 0.5
+        ) * self.coarse_resolution
         self.live_hits: dict[tuple[int, int, int], int] = {}
         self.coarse_live_hits: dict[tuple[int, int, int], int] = {}
         self.hazard_observations: dict[tuple[int, int, int], list[int]] = defaultdict(list)
@@ -278,15 +282,16 @@ class DynamicOccupancyMap:
         return np.vstack(accepted) if accepted else np.empty((0, 3), dtype=np.float64)
 
     def occupancy_layers(self, include_baseline: bool = True,
-                         confirmed_only: bool = True) -> list[tuple[str, np.ndarray, float]]:
+                         confirmed_only: bool = True,
+                         center: np.ndarray | None = None,
+                         horizontal_radius_m: float | None = None) -> list[tuple[str, np.ndarray, float]]:
         threshold = self.min_obstacle_voxels if confirmed_only else 1
-        fine = set(self.baseline_keys) if include_baseline else set()
+        fine: set[tuple[int, int, int]] = set()
         fine.update(key for key, hits in self.live_hits.items() if hits >= threshold)
-        if not include_baseline:
-            fine.difference_update(self.baseline_keys)
-        coarse = set(self.coarse_baseline_keys) if include_baseline else set()
+        coarse: set[tuple[int, int, int]] = set()
         coarse.update(key for key, hits in self.coarse_live_hits.items() if hits >= threshold)
         if not include_baseline:
+            fine.difference_update(self.baseline_keys)
             coarse.difference_update(self.coarse_baseline_keys)
 
         def centers(keys: set[tuple[int, int, int]], resolution: float) -> np.ndarray:
@@ -294,10 +299,22 @@ class DynamicOccupancyMap:
                 return np.empty((0, 3), dtype=np.float64)
             return (np.asarray(list(keys), dtype=np.float64) + 0.5) * resolution
 
-        return [
-            ("fine", centers(fine, self.resolution), self.resolution),
-            ("coarse", centers(coarse, self.coarse_resolution), self.coarse_resolution),
-        ]
+        fine_centers = centers(fine, self.resolution)
+        coarse_centers = centers(coarse, self.coarse_resolution)
+        if include_baseline:
+            fine_centers = np.vstack((self._baseline_fine_centers, fine_centers))
+            coarse_centers = np.vstack((self._baseline_coarse_centers, coarse_centers))
+        if center is not None and horizontal_radius_m is not None:
+            center = np.asarray(center, dtype=np.float64)
+            radius_squared = float(horizontal_radius_m) ** 2
+            fine_centers = fine_centers[
+                np.sum((fine_centers[:, :2] - center[:2]) ** 2, axis=1) <= radius_squared
+            ]
+            coarse_centers = coarse_centers[
+                np.sum((coarse_centers[:, :2] - center[:2]) ** 2, axis=1) <= radius_squared
+            ]
+        return [("fine", fine_centers, self.resolution),
+                ("coarse", coarse_centers, self.coarse_resolution)]
 
     def classified_zones(self) -> tuple[list[dict], list[dict]]:
         active: list[dict] = []

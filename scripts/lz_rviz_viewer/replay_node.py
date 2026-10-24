@@ -177,7 +177,6 @@ class LandingZoneRvizReplay(Node):
         self.image_pub = self.create_publisher(Image, "/ddlzd/camera_overlay", live)
         self.cloud_pub.publish(point_cloud_message(cloud, self.origin))
         self.static_pub.publish(self.zone_markers(0))
-        self.occupancy_pub.publish(self.occupancy_markers(0, include_baseline=True))
         self.get_logger().info(
             f"Published {len(cloud)} cloud points, {len(self.zones)} landing zones, and "
             f"{self.occupancy.baseline_voxel_count} adaptive baseline occupancy voxels"
@@ -228,9 +227,14 @@ class LandingZoneRvizReplay(Node):
         rgb = anchors[index] * (1.0 - fraction) + anchors[index + 1] * fraction
         return ColorRGBA(r=float(rgb[0]), g=float(rgb[1]), b=float(rgb[2]), a=0.46)
 
-    def occupancy_markers(self, timestamp_ns: int, include_baseline: bool = False) -> MarkerArray:
+    def occupancy_markers(self, timestamp_ns: int, include_baseline: bool = False,
+                          center: np.ndarray | None = None,
+                          radius_m: float | None = None) -> MarkerArray:
         limit = int(self.config["dynamic_occupancy"]["max_visualized_voxels"])
-        layers = self.occupancy.occupancy_layers(include_baseline=include_baseline)
+        layers = self.occupancy.occupancy_layers(
+            include_baseline=include_baseline, center=center,
+            horizontal_radius_m=radius_m,
+        )
         total = max(1, sum(len(values) for _, values, _ in layers))
         output: list[Marker] = []
         for layer_index, (level, values, resolution) in enumerate(layers):
@@ -350,11 +354,19 @@ class LandingZoneRvizReplay(Node):
             occupancy_interval_ns = int(1e9 / float(self.config["dynamic_occupancy"]["publish_hz"]))
             zone_interval_ns = int(1e9 / float(self.config["dynamic_occupancy"]["zone_publish_hz"]))
             max_lidar_range = float(self.config["dynamic_occupancy"]["maximum_lidar_range_m"])
+            rolling_radius = float(
+                self.config["dynamic_occupancy"]["rolling_horizontal_radius_m"]
+            )
             lidar_stride = int(self.config["dynamic_occupancy"]["point_stride"])
             corrected_alignment_ready = False
+            lidar_timings: dict[str, list[float]] = {
+                "transform": [], "occupancy": [], "zone_publish": [],
+                "map_publish": [], "total": [],
+            }
             while rclpy.ok() and not self.stop.is_set() and reader.has_next():
                 topic, raw, bag_time = reader.read_next()
                 if topic == lidar_topic:
+                    scan_started = time.perf_counter()
                     message = deserialize_message(raw, lidar_type)
                     timestamp = stamp_ns(message, bag_time)
                     try:
@@ -397,7 +409,13 @@ class LandingZoneRvizReplay(Node):
                     except LookupError as error:
                         self.get_logger().warning(str(error))
                         continue
+                    transformed_at = time.perf_counter()
+                    horizontal_distance = np.linalg.norm(
+                        ortho_points[:, :2] - lidar_origin[:2], axis=1,
+                    )
+                    ortho_points = ortho_points[horizontal_distance <= rolling_radius]
                     changed = self.occupancy.update(ortho_points, lidar_origin)
+                    occupied_at = time.perf_counter()
                     lidar_frame_number += 1
                     if changed:
                         self.active_zones, self.blocked_zones = self.occupancy.classified_zones()
@@ -407,10 +425,29 @@ class LandingZoneRvizReplay(Node):
                         self.static_pub.publish(self.zone_markers(timestamp))
                         last_zone_publish = timestamp
                         zones_dirty = False
+                    zone_published_at = time.perf_counter()
                     if (last_occupancy_publish is None
                             or timestamp - last_occupancy_publish >= occupancy_interval_ns):
-                        self.occupancy_pub.publish(self.occupancy_markers(timestamp))
+                        self.occupancy_pub.publish(self.occupancy_markers(
+                            timestamp, include_baseline=True, center=lidar_origin,
+                            radius_m=rolling_radius,
+                        ))
                         last_occupancy_publish = timestamp
+                    scan_finished = time.perf_counter()
+                    for name, value in (
+                        ("transform", transformed_at - scan_started),
+                        ("occupancy", occupied_at - transformed_at),
+                        ("zone_publish", zone_published_at - occupied_at),
+                        ("map_publish", scan_finished - zone_published_at),
+                        ("total", scan_finished - scan_started),
+                    ):
+                        lidar_timings[name].append(value * 1000.0)
+                    if lidar_frame_number % 100 == 0:
+                        report = " | ".join(
+                            f"{name} {np.mean(values[-100:]):.1f}/{np.percentile(values[-100:], 95):.1f}ms"
+                            for name, values in lidar_timings.items()
+                        )
+                        self.get_logger().info(f"LiDAR timing mean/P95: {report}")
                     continue
                 if topic != image_topic:
                     continue

@@ -132,6 +132,7 @@ interest_padding_m: 1.0
 confirmation_hits: 2
 confirmation_window_scans: 3
 maximum_lidar_range_m: 80.0
+rolling_horizontal_radius_m: 10.0
 point_stride: 3
 publish_hz: 2.0
 zone_publish_hz: 5.0

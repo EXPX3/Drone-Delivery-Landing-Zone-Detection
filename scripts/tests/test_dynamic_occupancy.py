@@ -196,6 +196,17 @@ class DynamicOccupancyTests(unittest.TestCase):
         occupancy.update(point)
         self.assertEqual(len(occupancy.classified_zones()[1]), 1)
 
+    def test_rolling_visualization_crops_baseline_horizontally(self):
+        baseline = np.array([[0.0, 0.0, 10.0], [50.0, 50.0, 10.0]])
+        occupancy = DynamicOccupancyMap(
+            baseline, [zone()], resolution=0.2, coarse_resolution=1.0,
+        )
+        layers = occupancy.occupancy_layers(
+            include_baseline=True, center=np.array([0.0, 0.0, 12.0]),
+            horizontal_radius_m=10.0,
+        )
+        self.assertEqual(sum(len(points) for _, points, _ in layers), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
