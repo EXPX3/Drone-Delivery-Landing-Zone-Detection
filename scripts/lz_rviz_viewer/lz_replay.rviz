@@ -112,14 +112,17 @@ Visualization Manager:
       Channel Name: rgb
       Class: rviz_default_plugins/PointCloud2
       Color Transformer: RGB8
-      Decay Time: 0.5
+      # Keep the most recent classified scan visible. Semantic objects in this
+      # bag often contain only 3-10 Velodyne returns and otherwise disappear
+      # between the lower-rate inference updates.
+      Decay Time: 0
       Enabled: true
       Name: Semantic Obstacles
       Position Transformer: XYZ
       Selectable: true
-      Size (Pixels): 5
-      Size (m): 0.08
-      Style: Points
+      Size (Pixels): 8
+      Size (m): 0.22
+      Style: Spheres
       Topic:
         Depth: 1
         Durability Policy: Transient Local

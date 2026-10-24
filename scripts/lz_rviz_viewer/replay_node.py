@@ -394,6 +394,9 @@ class LandingZoneRvizReplay(Node):
             lidar_frame_number = 0
             latest_lidar_points = np.empty((0, 3), dtype=np.float64)
             latest_lidar_stamp = 0
+            retained_semantic_points = np.empty((0, 3), dtype=np.float64)
+            retained_semantic_colors = np.empty((0, 3), dtype=np.uint8)
+            retained_semantic_stamp = 0
             pose_index = -1
             pose_time_error = 0.0
             interval_ns = int(1e9 / self.args.fps)
@@ -546,16 +549,26 @@ class LandingZoneRvizReplay(Node):
                     if np.any(selected):
                         names = np.asarray(semantic_result.class_names, dtype=object)[labels[selected] - 1]
                         colors = np.asarray([CLASS_COLORS_RGB[name] for name in names], dtype=np.uint8)
-                        cloud_message = colored_point_cloud_message(
-                            latest_lidar_points[selected], colors, self.origin,
-                        )
-                        ros_stamp(cloud_message, timestamp)
-                        self.semantic_pub.publish(cloud_message)
+                        retained_semantic_points = latest_lidar_points[selected]
+                        retained_semantic_colors = colors
+                        retained_semantic_stamp = timestamp
                         semantic_counts = {
                             name: int(np.count_nonzero(names == name)) for name in set(names)
                         }
                 if semantic_result is not None:
                     frame = colorize_frame(frame, semantic_result)
+                retention_ns = int(float(semantic.get("retention_s", 1.0)) * 1e9)
+                if timestamp - retained_semantic_stamp <= retention_ns:
+                    semantic_points = retained_semantic_points
+                    semantic_colors = retained_semantic_colors
+                else:
+                    semantic_points = np.empty((0, 3), dtype=np.float64)
+                    semantic_colors = np.empty((0, 3), dtype=np.uint8)
+                semantic_cloud = colored_point_cloud_message(
+                    semantic_points, semantic_colors, self.origin,
+                )
+                ros_stamp(semantic_cloud, timestamp)
+                self.semantic_pub.publish(semantic_cloud)
                 map_to_base = chain_transform(
                     tf_data, [self.config["frames"]["map"], self.config["frames"]["base"]], timestamp,
                     float(self.config["synchronization"]["max_tf_gap_s"]),
