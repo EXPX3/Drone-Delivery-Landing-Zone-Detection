@@ -75,8 +75,10 @@ Visualization Manager:
       Enabled: true
       Name: Dynamic Octomap
       Namespaces:
-        baseline_occupancy: true
-        live_occupancy: true
+        baseline_occupancy_coarse: true
+        baseline_occupancy_fine: true
+        live_occupancy_coarse: true
+        live_occupancy_fine: true
       Topic:
         Depth: 1
         Durability Policy: Transient Local

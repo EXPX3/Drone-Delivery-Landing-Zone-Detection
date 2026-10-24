@@ -3,8 +3,16 @@
 ## Purpose
 
 Branch `dynamic_lz_selection` extends the synchronized RViz replay with a sparse,
-live occupancy map built from `/velodyne_points`. The Bayern point cloud initializes
-the map, and registered LiDAR returns add confirmed occupancy while the bag plays.
+continuously updated occupancy map built from `/velodyne_points`. The Bayern point
+cloud initializes the map, and corrected LiDAR returns add confirmed occupancy on
+every scan while the bag plays.
+
+The corrected replay uses `bag_only_strip_optimized_poses.npz`, the frozen bag-only
+trajectory that reduced held-out vertical-bias RMSE from `0.4036 m` to `0.0583 m`.
+Each scan is timestamp-matched to that trajectory, points and firing times share one
+validity mask, and every retained point is deskewed before occupancy integration.
+The node rejects a missing archive or a timestamp discrepancy above 30 ms rather
+than silently falling back to the layered trajectory.
 
 The initial 1,356 risk-ranked candidates remain the terrain-geometry source of truth.
 Live occupancy conservatively updates them:
@@ -16,6 +24,20 @@ Live occupancy conservatively updates them:
 - A live voxel requires three observations before affecting a candidate.
 - Only obstacles 0.35-20 m above the landing surface affect clearance.
 - Blocked candidates are removed from camera projection and shown as gray crosses.
+
+### Continuous adaptive occupancy
+
+Two octree-style depths reduce update and rendering cost:
+
+- `0.35 m` fine voxels cover every landing circle, its 2 m wind/GNSS margin, and
+  1 m additional context. Only this layer can block or downgrade a candidate.
+- `1.40 m` coarse voxels represent all other areas for environmental context.
+- Three scan observations confirm a live voxel before publication or LZ effects.
+- Point stride three, batched voxel uniqueness, spatial candidate indexing, 2 Hz map
+  publication and 1 Hz zone publication bound processing cost.
+
+On the current Bayern cloud, this stores 250,273 baseline voxels versus 396,035 for
+a globally fine 0.35 m grid, a `36.8%` reduction while preserving decision regions.
 
 The live sensor does not create new flat candidates from obstacle endpoints. Adding
 new candidates requires rerunning region-growing surface analysis on an accumulated
@@ -43,8 +65,8 @@ docker logs -f ddlzd-lz-rviz
 ## RViz Layers
 
 - `Point Cloud`: source PCD rendered lightly for geometric context.
-- `Dynamic Octomap / baseline_occupancy`: initial voxel occupancy.
-- `Dynamic Octomap / live_occupancy`: confirmed LiDAR additions.
+- `Dynamic Octomap / baseline_occupancy_fine|coarse`: initial adaptive occupancy.
+- `Dynamic Octomap / live_occupancy_fine|coarse`: corrected-LiDAR additions.
 - `Landing Zones`: current active categories and blocked-zone crosses.
 - `Live Camera Geometry`: trajectory, UAV, frustum, footprint, and camera-visible LZs.
 
@@ -100,17 +122,27 @@ Dynamic parameters are under `dynamic_occupancy` in
 `scripts/config/lz_camera_projection.yaml`:
 
 ```yaml
-resolution_m: 0.75
+resolution_m: 0.35
+coarse_resolution_m: 1.40
+interest_padding_m: 1.0
 confirmation_hits: 3
 maximum_lidar_range_m: 80.0
-point_stride: 2
+point_stride: 3
 publish_hz: 2.0
 zone_publish_hz: 1.0
 gps_wind_margin_m: 2.0
 obstacle_min_height_m: 0.35
 vertical_clearance_m: 20.0
 zone_visual_lift_m: 0.65
+validated_pose_replay:
+  enabled: true
+  maximum_timestamp_error_s: 0.03
 ```
+
+This bag demonstration replays the final globally corrected trajectory and therefore
+reproduces the validated experiment exactly. A physical live sensor can use the same
+deskew and a causal sliding-window repeated-surface optimizer; endpoint loop closure
+and final global refinement remain delayed until a repeated area is observed.
 
 ## Tests
 
@@ -119,7 +151,7 @@ zone_visual_lift_m: 0.65
   -m unittest discover -s scripts/tests -v
 ```
 
-Expected result: 17 tests pass.
+Expected result: 24 tests pass.
 
 ## Synchronization Evidence
 

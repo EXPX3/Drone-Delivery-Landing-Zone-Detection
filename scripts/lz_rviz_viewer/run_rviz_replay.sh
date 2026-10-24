@@ -7,6 +7,7 @@ bag_path="${1:-/media/gvb/ssd24ubuntu/${default_bag_relative}}"
 rate="${2:-1.0}"
 fps="${3:-12.0}"
 image="${DDLZD_RVIZ_IMAGE:-cargopack:2026}"
+optimized_poses="${DDLZD_OPTIMIZED_POSES:-${repo_root}/pcds/bag_only_strip_optimized_poses.npz}"
 
 if [[ $# -eq 0 && ! -f "${bag_path}/metadata.yaml" ]]; then
   shopt -s nullglob
@@ -33,6 +34,17 @@ EOF
   exit 1
 fi
 
+if [[ ! -f "${optimized_poses}" ]]; then
+  cat >&2 <<EOF
+ERROR: The validated corrected-pose archive is missing:
+  ${optimized_poses}
+
+Generate it with the bag-only mapping pipeline documented in:
+  scripts/bag_lio_mapping/README.md
+EOF
+  exit 1
+fi
+
 printf 'Using ROS 2 bag: %s\n' "${bag_path}"
 xauthority="${XAUTHORITY:-$HOME/.Xauthority}"
 xauth_args=()
@@ -51,11 +63,13 @@ docker run --rm --name ddlzd-lz-rviz --gpus all --network host --ipc host \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   -v "${repo_root}:/workspace" \
   -v "${bag_path}:/bag:ro" \
+  -v "${optimized_poses}:/optimized_poses.npz:ro" \
   -w /workspace \
   --entrypoint bash "${image}" -lc "
     source /opt/ros/humble/setup.bash
     cp scripts/lz_rviz_viewer/lz_replay.rviz /tmp/ddlzd_lz_replay.rviz
-    python3 scripts/lz_rviz_viewer/replay_node.py --bag /bag --rate '${rate}' --fps '${fps}' &
+    python3 scripts/lz_rviz_viewer/replay_node.py --bag /bag --rate '${rate}' --fps '${fps}' \
+      --optimized-poses /optimized_poses.npz &
     node_pid=\$!
     ros2 run image_view image_view --ros-args --remap image:=/ddlzd/camera_overlay &
     image_pid=\$!

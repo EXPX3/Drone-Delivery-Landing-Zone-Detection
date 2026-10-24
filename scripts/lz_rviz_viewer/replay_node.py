@@ -32,6 +32,7 @@ from lz_rviz_viewer.dynamic_occupancy import (  # noqa: E402
     apply_centered_transform, DynamicOccupancyMap, interpolate_gps, pointcloud2_xyz,
     TerrainHeightModel,
 )
+from lz_rviz_viewer.validated_pose_replay import ValidatedPoseReplay  # noqa: E402
 from project_lz_into_bag_camera import (  # noqa: E402
     chain_transform, config_transform, decode_image, draw_zones, fit_utm_to_map,
     open_reader, read_pose_and_gps, require_ros, stamp_ns,
@@ -136,6 +137,19 @@ class LandingZoneRvizReplay(Node):
         self.origin[2] = 0.0
         self.lidar_correction = config_transform(self.config["registration"]["live_lidar_to_static"])
         dynamic = self.config["dynamic_occupancy"]
+        validated = dynamic.get("validated_pose_replay", {})
+        self.validated_replay = None
+        if bool(validated.get("enabled", False)):
+            if not args.optimized_poses.is_file():
+                raise FileNotFoundError(
+                    f"Validated pose replay is enabled but poses are missing: {args.optimized_poses}"
+                )
+            with args.mapping_config.open(encoding="utf-8") as handle:
+                mapping_config = yaml.safe_load(handle)
+            self.validated_replay = ValidatedPoseReplay(
+                args.optimized_poses, mapping_config["extrinsic_base_from_lidar"],
+                maximum_time_error_s=float(validated["maximum_timestamp_error_s"]),
+            )
         self.occupancy = DynamicOccupancyMap(
             full_cloud, self.zones,
             resolution=float(dynamic["resolution_m"]),
@@ -143,6 +157,8 @@ class LandingZoneRvizReplay(Node):
             obstacle_min_height_m=float(dynamic["obstacle_min_height_m"]),
             vertical_clearance_m=float(dynamic["vertical_clearance_m"]),
             min_obstacle_voxels=int(dynamic["confirmation_hits"]),
+            coarse_resolution=float(dynamic["coarse_resolution_m"]),
+            interest_padding_m=float(dynamic["interest_padding_m"]),
         )
         self.active_zones, self.blocked_zones = self.occupancy.classified_zones()
 
@@ -162,7 +178,7 @@ class LandingZoneRvizReplay(Node):
         self.occupancy_pub.publish(self.occupancy_markers(0, include_baseline=True))
         self.get_logger().info(
             f"Published {len(cloud)} cloud points, {len(self.zones)} landing zones, and "
-            f"{len(self.occupancy.baseline_keys)} baseline occupancy voxels"
+            f"{self.occupancy.baseline_voxel_count} adaptive baseline occupancy voxels"
         )
         self.worker = threading.Thread(target=self.replay, daemon=True)
         self.worker.start()
@@ -211,23 +227,32 @@ class LandingZoneRvizReplay(Node):
         return ColorRGBA(r=float(rgb[0]), g=float(rgb[1]), b=float(rgb[2]), a=0.46)
 
     def occupancy_markers(self, timestamp_ns: int, include_baseline: bool = False) -> MarkerArray:
-        values = self.occupancy.occupied_centers(include_baseline=include_baseline)
         limit = int(self.config["dynamic_occupancy"]["max_visualized_voxels"])
-        if len(values) > limit:
-            indices = np.random.default_rng(23).choice(len(values), limit, replace=False)
-            values = values[indices]
-        marker_id = 0 if include_baseline else 1
-        namespace = "baseline_occupancy" if include_baseline else "live_occupancy"
-        item = marker(marker_id, namespace, Marker.CUBE_LIST, (1.0, 1.0, 1.0, 0.72),
-                      self.occupancy.resolution * 0.92, timestamp_ns)
-        if len(values):
+        layers = self.occupancy.occupancy_layers(include_baseline=include_baseline)
+        total = max(1, sum(len(values) for _, values, _ in layers))
+        output: list[Marker] = []
+        for layer_index, (level, values, resolution) in enumerate(layers):
+            layer_limit = max(1, int(limit * len(values) / total))
+            if len(values) > layer_limit:
+                indices = np.random.default_rng(23 + layer_index).choice(
+                    len(values), layer_limit, replace=False,
+                )
+                values = values[indices]
+            marker_id = (0 if include_baseline else 10) + layer_index
+            prefix = "baseline_occupancy" if include_baseline else "live_occupancy"
+            item = marker(marker_id, f"{prefix}_{level}", Marker.CUBE_LIST,
+                          (1.0, 1.0, 1.0, 0.72), resolution * 0.92, timestamp_ns)
+            if not len(values):
+                output.append(item)
+                continue
             z_min, z_max = float(values[:, 2].min()), float(values[:, 2].max())
             span = max(z_max - z_min, 1e-6)
             for value in values:
                 local = value - self.origin
                 item.points.append(Point(x=float(local[0]), y=float(local[1]), z=float(local[2])))
                 item.colors.append(self.altitude_color((float(value[2]) - z_min) / span))
-        return MarkerArray(markers=[item])
+            output.append(item)
+        return MarkerArray(markers=output)
 
     def dynamic_markers(self, timestamp_ns: int, visible_zones: list[dict], trajectory: list[np.ndarray],
                         uav: np.ndarray, camera: np.ndarray, footprint: list[list[float]],
@@ -317,31 +342,54 @@ class LandingZoneRvizReplay(Node):
             trajectory: list[np.ndarray] = []
             frame_number = 0
             lidar_frame_number = 0
+            pose_index = -1
+            pose_time_error = 0.0
             interval_ns = int(1e9 / self.args.fps)
             occupancy_interval_ns = int(1e9 / float(self.config["dynamic_occupancy"]["publish_hz"]))
             zone_interval_ns = int(1e9 / float(self.config["dynamic_occupancy"]["zone_publish_hz"]))
             max_lidar_range = float(self.config["dynamic_occupancy"]["maximum_lidar_range_m"])
             lidar_stride = int(self.config["dynamic_occupancy"]["point_stride"])
+            corrected_alignment_ready = False
             while rclpy.ok() and not self.stop.is_set() and reader.has_next():
                 topic, raw, bag_time = reader.read_next()
                 if topic == lidar_topic:
                     message = deserialize_message(raw, lidar_type)
                     timestamp = stamp_ns(message, bag_time)
-                    lidar_points = pointcloud2_xyz(message)[::lidar_stride]
-                    ranges = np.linalg.norm(lidar_points, axis=1)
-                    lidar_points = lidar_points[(ranges > 1.0) & (ranges <= max_lidar_range)]
                     try:
-                        map_to_lidar = chain_transform(
-                            tf_data, self.config["frames"]["lidar_chain"], timestamp,
-                            float(self.config["synchronization"]["max_tf_gap_s"]),
-                        )
-                    except LookupError:
+                        if self.validated_replay is not None:
+                            if not corrected_alignment_ready:
+                                map_to_base = chain_transform(
+                                    tf_data, [self.config["frames"]["map"], self.config["frames"]["base"]],
+                                    timestamp, float(self.config["synchronization"]["max_tf_gap_s"]),
+                                )
+                                centered = np.eye(4)
+                                centered[:3, 3] = self.lidar_registration_origin
+                                uncentered = np.eye(4)
+                                uncentered[:3, 3] = -self.lidar_registration_origin
+                                static_correction = centered @ self.lidar_correction.matrix @ uncentered
+                                world_from_body = static_correction @ map_to_ortho.matrix @ map_to_base.matrix
+                                self.validated_replay.initialize_world_alignment(world_from_body)
+                                corrected_alignment_ready = True
+                            ortho_points, pose_index, pose_time_error = self.validated_replay.transform(
+                                message, bag_time, lidar_stride, 1.0, max_lidar_range,
+                            )
+                        else:
+                            lidar_points = pointcloud2_xyz(message)[::lidar_stride]
+                            ranges = np.linalg.norm(lidar_points, axis=1)
+                            lidar_points = lidar_points[(ranges > 1.0) & (ranges <= max_lidar_range)]
+                            map_to_lidar = chain_transform(
+                                tf_data, self.config["frames"]["lidar_chain"], timestamp,
+                                float(self.config["synchronization"]["max_tf_gap_s"]),
+                            )
+                            map_points = transform_points(map_to_lidar, lidar_points)
+                            ortho_points = transform_points(map_to_ortho, map_points)
+                            ortho_points = apply_centered_transform(
+                                ortho_points, self.lidar_correction.matrix, self.lidar_registration_origin,
+                            )
+                            pose_index, pose_time_error = lidar_frame_number, 0.0
+                    except LookupError as error:
+                        self.get_logger().warning(str(error))
                         continue
-                    map_points = transform_points(map_to_lidar, lidar_points)
-                    ortho_points = transform_points(map_to_ortho, map_points)
-                    ortho_points = apply_centered_transform(
-                        ortho_points, self.lidar_correction.matrix, self.lidar_registration_origin,
-                    )
                     changed = self.occupancy.update(ortho_points)
                     lidar_frame_number += 1
                     if changed:
@@ -402,6 +450,9 @@ class LandingZoneRvizReplay(Node):
                 text = f"Frame {frame_number:06d} | t={relative:.3f}s | ROS {timestamp} ns"
                 status = (f"LZ active {len(self.active_zones)} | blocked {len(self.blocked_zones)} | "
                           f"LiDAR {lidar_frame_number} | GNSS/TF {geographic_error:.2f} m")
+                if self.validated_replay is not None:
+                    status += (f" | corrected {max(0, pose_index + 1)}/{len(self.validated_replay.poses)} "
+                               f"dt {pose_time_error * 1e3:.1f}ms")
                 cv2.rectangle(frame, (0, 0), (frame.shape[1], 68), (0, 0, 0), -1)
                 cv2.putText(frame, text, (14, 27), cv2.FONT_HERSHEY_SIMPLEX,
                             0.62, (255, 255, 255), 2, cv2.LINE_AA)
@@ -438,6 +489,10 @@ def main() -> int:
     parser.add_argument("--fps", type=float, default=12.0)
     parser.add_argument("--rate", type=float, default=1.0)
     parser.add_argument("--image-width", type=int, default=640)
+    parser.add_argument("--optimized-poses", type=Path,
+                        default=root / "pcds/bag_only_strip_optimized_poses.npz")
+    parser.add_argument("--mapping-config", type=Path,
+                        default=root / "scripts/bag_lio_mapping/kiss_icp_config.yaml")
     args = parser.parse_args()
     rclpy.init()
     node = LandingZoneRvizReplay(args)

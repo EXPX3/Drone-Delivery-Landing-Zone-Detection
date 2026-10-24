@@ -100,15 +100,35 @@ class DynamicOccupancyMap:
 
     def __init__(self, baseline_points: np.ndarray, zones: list[dict], resolution: float = 0.75,
                  gps_margin_m: float = 2.0, obstacle_min_height_m: float = 0.35,
-                 vertical_clearance_m: float = 20.0, min_obstacle_voxels: int = 3) -> None:
+                 vertical_clearance_m: float = 20.0, min_obstacle_voxels: int = 3,
+                 coarse_resolution: float | None = None,
+                 interest_padding_m: float = 1.0) -> None:
         self.resolution = float(resolution)
+        self.coarse_resolution = float(coarse_resolution or resolution)
+        if self.coarse_resolution < self.resolution:
+            raise ValueError("Coarse occupancy resolution cannot be finer than the interest resolution")
         self.gps_margin_m = float(gps_margin_m)
         self.obstacle_min_height_m = float(obstacle_min_height_m)
         self.vertical_clearance_m = float(vertical_clearance_m)
         self.min_obstacle_voxels = int(min_obstacle_voxels)
-        baseline = unique_rows(voxel_keys(baseline_points, self.resolution))
-        self.baseline_keys = {tuple(int(v) for v in row) for row in baseline}
+        self.interest_padding_m = float(interest_padding_m)
+        self._zone_centers = np.asarray(
+            [[float(zone["x"]), float(zone["y"])] for zone in zones], dtype=np.float64,
+        )
+        self._zone_reach = np.asarray(
+            [float(zone["radius"]) + self.gps_margin_m + self.interest_padding_m for zone in zones],
+            dtype=np.float64,
+        )
+        self._zone_tree = cKDTree(self._zone_centers)
+        baseline_interest = self._interest_mask(np.asarray(baseline_points))
+        fine_baseline = unique_rows(voxel_keys(baseline_points[baseline_interest], self.resolution))
+        coarse_baseline = unique_rows(voxel_keys(
+            baseline_points[~baseline_interest], self.coarse_resolution,
+        ))
+        self.baseline_keys = {tuple(int(v) for v in row) for row in fine_baseline}
+        self.coarse_baseline_keys = {tuple(int(v) for v in row) for row in coarse_baseline}
         self.live_hits: dict[tuple[int, int, int], int] = {}
+        self.coarse_live_hits: dict[tuple[int, int, int], int] = {}
         self.zones = zones
         self.evidence = {int(zone["rank"]): CandidateEvidence() for zone in zones}
         self._cell_size = max(5.0, max(float(zone["radius"]) for zone in zones) + self.gps_margin_m)
@@ -123,8 +143,24 @@ class DynamicOccupancyMap:
                 for gy in range(y0, y1 + 1):
                     self._zone_grid[(gx, gy)].append(zone)
 
+    def _interest_mask(self, points: np.ndarray) -> np.ndarray:
+        if len(points) == 0:
+            return np.zeros(0, dtype=bool)
+        distance, index = self._zone_tree.query(points[:, :2], k=1)
+        return distance <= self._zone_reach[index]
+
+    @property
+    def baseline_voxel_count(self) -> int:
+        return len(self.baseline_keys) + len(self.coarse_baseline_keys)
+
     def update(self, points: np.ndarray) -> int:
-        keys = unique_rows(voxel_keys(points, self.resolution))
+        points = np.asarray(points, dtype=np.float64)
+        interest = self._interest_mask(points)
+        keys = unique_rows(voxel_keys(points[interest], self.resolution))
+        coarse_keys = unique_rows(voxel_keys(points[~interest], self.coarse_resolution))
+        for row in coarse_keys:
+            key = tuple(int(v) for v in row)
+            self.coarse_live_hits[key] = self.coarse_live_hits.get(key, 0) + 1
         changed = 0
         for row in keys:
             key = tuple(int(v) for v in row)
@@ -152,6 +188,28 @@ class DynamicOccupancyMap:
                     evidence.nearest_obstacle_m = min(evidence.nearest_obstacle_m, distance)
         return changed
 
+    def occupancy_layers(self, include_baseline: bool = True,
+                         confirmed_only: bool = True) -> list[tuple[str, np.ndarray, float]]:
+        threshold = self.min_obstacle_voxels if confirmed_only else 1
+        fine = set(self.baseline_keys) if include_baseline else set()
+        fine.update(key for key, hits in self.live_hits.items() if hits >= threshold)
+        if not include_baseline:
+            fine.difference_update(self.baseline_keys)
+        coarse = set(self.coarse_baseline_keys) if include_baseline else set()
+        coarse.update(key for key, hits in self.coarse_live_hits.items() if hits >= threshold)
+        if not include_baseline:
+            coarse.difference_update(self.coarse_baseline_keys)
+
+        def centers(keys: set[tuple[int, int, int]], resolution: float) -> np.ndarray:
+            if not keys:
+                return np.empty((0, 3), dtype=np.float64)
+            return (np.asarray(list(keys), dtype=np.float64) + 0.5) * resolution
+
+        return [
+            ("fine", centers(fine, self.resolution), self.resolution),
+            ("coarse", centers(coarse, self.coarse_resolution), self.coarse_resolution),
+        ]
+
     def classified_zones(self) -> tuple[list[dict], list[dict]]:
         active: list[dict] = []
         blocked: list[dict] = []
@@ -174,12 +232,6 @@ class DynamicOccupancyMap:
         return active, blocked
 
     def occupied_centers(self, include_baseline: bool = True, confirmed_only: bool = True) -> np.ndarray:
-        keys: set[tuple[int, int, int]] = set(self.baseline_keys) if include_baseline else set()
-        threshold = self.min_obstacle_voxels if confirmed_only else 1
-        keys.update(key for key, hits in self.live_hits.items() if hits >= threshold)
-        if not include_baseline:
-            keys.difference_update(self.baseline_keys)
-        if not keys:
-            return np.empty((0, 3), dtype=np.float64)
-        values = np.asarray(list(keys), dtype=np.float64)
-        return (values + 0.5) * self.resolution
+        layers = self.occupancy_layers(include_baseline, confirmed_only)
+        populated = [centers for _, centers, _ in layers if len(centers)]
+        return np.vstack(populated) if populated else np.empty((0, 3), dtype=np.float64)

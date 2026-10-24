@@ -2,6 +2,7 @@
 
 import struct
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,6 +14,9 @@ sys.path.insert(0, str(SCRIPTS))
 
 from lz_rviz_viewer.dynamic_occupancy import (
     apply_centered_transform, DynamicOccupancyMap, interpolate_gps, pointcloud2_xyz,
+)
+from lz_rviz_viewer.validated_pose_replay import (
+    timed_xyz, transform_timed_points, ValidatedPoseReplay,
 )
 
 
@@ -86,6 +90,54 @@ class DynamicOccupancyTests(unittest.TestCase):
         occupancy.update(point)
         active, blocked = occupancy.classified_zones()
         self.assertEqual((len(active), len(blocked)), (1, 0))
+
+    def test_timed_decoder_keeps_point_and_time_masks_paired(self):
+        fields = [
+            SimpleNamespace(name="x", offset=0, datatype=7),
+            SimpleNamespace(name="y", offset=4, datatype=7),
+            SimpleNamespace(name="z", offset=8, datatype=7),
+            SimpleNamespace(name="time", offset=12, datatype=7),
+        ]
+        data = struct.pack("<ffff", 1.0, 2.0, 3.0, -0.1)
+        data += struct.pack("<ffff", np.nan, 5.0, 6.0, 0.0)
+        message = SimpleNamespace(fields=fields, width=2, height=1, point_step=16, data=data)
+        points, times = timed_xyz(message)
+        np.testing.assert_allclose(points, [[1.0, 2.0, 3.0]])
+        np.testing.assert_allclose(times, [-0.1])
+
+    def test_timed_transform_interpolates_scan_translation(self):
+        previous, current = np.eye(4), np.eye(4)
+        current[0, 3] = 2.0
+        result = transform_timed_points(
+            np.zeros((3, 3)), np.array([-0.1, -0.05, 0.0]), previous, current,
+        )
+        np.testing.assert_allclose(result[:, 0], [0.0, 1.0, 2.0])
+
+    def test_validated_pose_replay_enforces_timestamp_contract(self):
+        poses = np.repeat(np.eye(4)[None, :, :], 2, axis=0)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "poses.npz"
+            np.savez_compressed(path, poses=poses, timestamps=np.array([1.0, 1.1]))
+            replay = ValidatedPoseReplay(
+                path, {"translation_m": [0, 0, 0], "quaternion_xyzw": [0, 0, 0, 1]},
+                maximum_time_error_s=0.02,
+            )
+            self.assertEqual(replay.pose_index(1_000_000_000)[0], 0)
+            with self.assertRaises(RuntimeError):
+                replay.pose_index(1_200_000_000)
+
+    def test_adaptive_occupancy_uses_fine_voxels_only_near_zones(self):
+        occupancy = DynamicOccupancyMap(
+            np.empty((0, 3)), [zone()], resolution=0.25, coarse_resolution=2.0,
+            interest_padding_m=0.5, min_obstacle_voxels=1,
+        )
+        occupancy.update(np.array([[1.0, 0.0, 11.0], [20.0, 20.0, 11.0]]))
+        layers = {name: (centers, size) for name, centers, size in occupancy.occupancy_layers(False)}
+        self.assertEqual(len(layers["fine"][0]), 1)
+        self.assertEqual(layers["fine"][1], 0.25)
+        self.assertEqual(len(layers["coarse"][0]), 1)
+        self.assertEqual(layers["coarse"][1], 2.0)
+        self.assertEqual(len(occupancy.classified_zones()[1]), 1)
 
 
 if __name__ == "__main__":
