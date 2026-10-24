@@ -34,6 +34,16 @@ dynamic_occupancy:
   # dominant source of the growing horizontal semantic halo.
   minimum_height_above_ground_m: 0.12
   maximum_height_above_ground_m: 3.0
+  vision_guided_lidar:
+    # Vision selects a region to inspect but cannot block a zone by itself.
+    # Blocking requires physical above-ground LiDAR support in two frames.
+    minimum_image_confidence:
+      person: 0.70
+      cargo_box: 0.25
+      vehicle: 0.30
+    minimum_lidar_points_per_frame: 2
+    confirmation_frames: 2
+    resolution_m: 0.25
   confirmation_window_scans: 3
   maximum_lidar_range_m: 80.0
   rolling_horizontal_radius_m: 10.0

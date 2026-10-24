@@ -81,12 +81,12 @@ class DynamicOccupancyTests(unittest.TestCase):
         self.assertEqual(active[0]["category"], "risky")
         self.assertEqual(active[0]["dynamic_state"], "margin")
 
-    def test_confirmed_semantic_obstacle_blocks_candidate(self):
+    def test_confirmed_lidar_obstacle_blocks_candidate(self):
         occupancy = DynamicOccupancyMap(
             np.empty((0, 3)), [zone()], resolution=0.2,
             obstacle_min_height_m=0.15, min_obstacle_voxels=3,
         )
-        changed = occupancy.add_confirmed_semantic_obstacles(
+        changed = occupancy.add_confirmed_lidar_obstacles(
             np.array([[0.5, 0.0, 10.5]]),
         )
         active, blocked = occupancy.classified_zones()

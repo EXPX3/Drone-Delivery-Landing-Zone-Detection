@@ -225,6 +225,12 @@ class LandingZoneRvizReplay(Node):
             contradiction_hits=int(semantic.get("contradiction_hits", 2)),
             confirmation_hits=int(semantic.get("confirmation_hits", 2)),
         )
+        verification = semantic.get("vision_guided_lidar", {})
+        self.guided_lidar_memory = SemanticVoxelMemory(
+            resolution_m=float(verification.get("resolution_m", 0.25)),
+            contradiction_hits=1,
+            confirmation_hits=int(verification.get("confirmation_frames", 2)),
+        )
         self.cloud_pub.publish(point_cloud_message(cloud, self.origin))
         self.static_pub.publish(self.zone_markers(0))
         self.get_logger().info(
@@ -577,14 +583,35 @@ class LandingZoneRvizReplay(Node):
                         semantic_points = semantic_points[height_ok]
                         names = names[height_ok]
                         self.semantic_memory.update(semantic_points, names)
+                        verification = semantic.get("vision_guided_lidar", {})
+                        thresholds = verification.get("minimum_image_confidence", {})
+                        point_detection = labels[selected][height_ok] - 1
+                        point_confidence = semantic_result.confidences[point_detection]
+                        minimum_confidence = np.asarray([
+                            float(thresholds.get(str(name), 1.0)) for name in names
+                        ])
+                        trusted = point_confidence >= minimum_confidence
+                        minimum_points = int(verification.get("minimum_lidar_points_per_frame", 2))
+                        guided_points: list[np.ndarray] = []
+                        guided_names: list[str] = []
+                        for class_name in set(names[trusted]):
+                            class_points = semantic_points[trusted & (names == class_name)]
+                            if len(class_points) >= minimum_points:
+                                guided_points.extend(class_points)
+                                guided_names.extend([str(class_name)] * len(class_points))
+                        if guided_points:
+                            self.guided_lidar_memory.update(
+                                np.asarray(guided_points), np.asarray(guided_names, dtype=object),
+                            )
                         semantic_counts = {
                             name: int(np.count_nonzero(names == name)) for name in set(names)
                         }
                 if semantic_result is not None:
                     frame = colorize_frame(frame, semantic_result)
                 semantic_points, semantic_colors = self.semantic_memory.point_cloud()
-                semantic_zone_changes = self.occupancy.add_confirmed_semantic_obstacles(
-                    semantic_points,
+                confirmed_lidar_points, _ = self.guided_lidar_memory.point_cloud()
+                semantic_zone_changes = self.occupancy.add_confirmed_lidar_obstacles(
+                    confirmed_lidar_points,
                 )
                 if semantic_zone_changes:
                     self.active_zones, self.blocked_zones = self.occupancy.classified_zones()

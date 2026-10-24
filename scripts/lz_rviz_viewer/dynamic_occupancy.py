@@ -340,8 +340,8 @@ class DynamicOccupancyMap:
                 active.append(zone)
         return active, blocked
 
-    def add_confirmed_semantic_obstacles(self, points: np.ndarray) -> int:
-        """Apply temporally confirmed semantic points as persistent safety evidence."""
+    def add_confirmed_lidar_obstacles(self, points: np.ndarray) -> int:
+        """Apply independently confirmed above-ground LiDAR points as safety evidence."""
         changed = 0
         for point in np.asarray(points, dtype=np.float64):
             key = tuple(int(value) for value in np.floor(point / self.resolution))
