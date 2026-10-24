@@ -47,7 +47,8 @@ would not be geometrically valid.
 ## Start
 
 ```bash
-findmnt -S /dev/nvme1n1p1 >/dev/null || udisksctl mount -b /dev/nvme1n1p1
+findmnt -S /dev/disk/by-label/ssd24ubuntu >/dev/null || \
+  udisksctl mount -b /dev/disk/by-label/ssd24ubuntu
 
 cd /home/gvb/Documents/robotspace/DDLZD_ws/Drone-Delivery-Landing-Zone-Detection
 git switch dynamic_lz_selection

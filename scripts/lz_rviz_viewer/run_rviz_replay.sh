@@ -27,7 +27,7 @@ ERROR: No readable ROS 2 bag was found at:
   ${bag_path}
 
 Mount the SSD first, for example:
-  udisksctl mount -b /dev/nvme1n1p1
+  udisksctl mount -b /dev/disk/by-label/ssd24ubuntu
 
 Then pass the mounted bag path explicitly if needed.
 EOF
