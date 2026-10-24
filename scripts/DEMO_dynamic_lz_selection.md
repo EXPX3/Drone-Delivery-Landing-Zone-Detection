@@ -69,8 +69,9 @@ docker logs -f ddlzd-lz-rviz
 ## RViz Layers
 
 - `Point Cloud`: source PCD rendered lightly for geometric context.
-- `Dynamic Octomap / baseline_occupancy_fine|coarse`: initial adaptive occupancy.
-- `Dynamic Octomap / live_occupancy_fine|coarse`: corrected-LiDAR additions.
+- `Point Cloud`: the complete static Bayern reference.
+- `Updated Live Map (Total)`: every accumulated corrected live voxel over the full
+  observed area, published as an efficient point cloud rather than cube markers.
 - `Landing Zones`: current active categories and blocked-zone crosses.
 - `Live Camera Geometry`: trajectory, UAV, frustum, footprint, and camera-visible LZs.
 
@@ -131,8 +132,8 @@ coarse_resolution_m: 1.00
 interest_padding_m: 1.0
 confirmation_hits: 2
 confirmation_window_scans: 3
-maximum_lidar_range_m: 80.0
-rolling_horizontal_radius_m: 10.0
+maximum_lidar_range_m: 80.0       # complete live-map integration
+rolling_horizontal_radius_m: 10.0 # landing-zone processing only
 point_stride: 3
 publish_hz: 5.0
 max_visualized_voxels: 20000

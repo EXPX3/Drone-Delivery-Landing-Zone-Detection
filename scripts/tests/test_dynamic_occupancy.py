@@ -207,6 +207,16 @@ class DynamicOccupancyTests(unittest.TestCase):
         )
         self.assertEqual(sum(len(points) for _, points, _ in layers), 1)
 
+    def test_full_map_updates_outside_hazard_processing_radius(self):
+        occupancy = DynamicOccupancyMap(
+            np.empty((0, 3)), [zone()], resolution=0.2, coarse_resolution=1.0,
+            min_obstacle_voxels=1,
+        )
+        far_point = np.array([[30.0, 30.0, 11.0]])
+        occupancy.update(far_point, np.zeros(3), hazard_points=np.empty((0, 3)))
+        self.assertEqual(len(occupancy.occupied_centers(include_baseline=False)), 1)
+        self.assertEqual(len(occupancy.classified_zones()[1]), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -174,6 +174,9 @@ class LandingZoneRvizReplay(Node):
         self.static_pub = self.create_publisher(MarkerArray, "/ddlzd/landing_zones", durable)
         self.dynamic_pub = self.create_publisher(MarkerArray, "/ddlzd/replay_markers", live)
         self.occupancy_pub = self.create_publisher(MarkerArray, "/ddlzd/occupancy", durable)
+        self.occupancy_cloud_pub = self.create_publisher(
+            PointCloud2, "/ddlzd/live_occupancy_points", durable,
+        )
         self.image_pub = self.create_publisher(Image, "/ddlzd/camera_overlay", live)
         self.cloud_pub.publish(point_cloud_message(cloud, self.origin))
         self.static_pub.publish(self.zone_markers(0))
@@ -413,8 +416,10 @@ class LandingZoneRvizReplay(Node):
                     horizontal_distance = np.linalg.norm(
                         ortho_points[:, :2] - lidar_origin[:2], axis=1,
                     )
-                    ortho_points = ortho_points[horizontal_distance <= rolling_radius]
-                    changed = self.occupancy.update(ortho_points, lidar_origin)
+                    hazard_points = ortho_points[horizontal_distance <= rolling_radius]
+                    changed = self.occupancy.update(
+                        ortho_points, lidar_origin, hazard_points=hazard_points,
+                    )
                     occupied_at = time.perf_counter()
                     lidar_frame_number += 1
                     if changed:
@@ -428,10 +433,10 @@ class LandingZoneRvizReplay(Node):
                     zone_published_at = time.perf_counter()
                     if (last_occupancy_publish is None
                             or timestamp - last_occupancy_publish >= occupancy_interval_ns):
-                        self.occupancy_pub.publish(self.occupancy_markers(
-                            timestamp, include_baseline=False, center=lidar_origin,
-                            radius_m=rolling_radius,
-                        ))
+                        live_map = self.occupancy.occupied_centers(include_baseline=False)
+                        cloud_message = point_cloud_message(live_map, self.origin)
+                        ros_stamp(cloud_message, timestamp)
+                        self.occupancy_cloud_pub.publish(cloud_message)
                         last_occupancy_publish = timestamp
                     scan_finished = time.perf_counter()
                     for name, value in (

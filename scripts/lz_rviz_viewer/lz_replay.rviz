@@ -71,20 +71,36 @@ Visualization Manager:
       Use Fixed Frame: true
       Use rainbow: true
       Value: true
-    - Class: rviz_default_plugins/MarkerArray
+    - Alpha: 0.72
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz_default_plugins/PointCloud2
+      Color: 255; 255; 255
+      Color Transformer: AxisColor
+      Decay Time: 0
       Enabled: true
-      Name: Dynamic Octomap
-      Namespaces:
-        baseline_occupancy_coarse: true
-        baseline_occupancy_fine: true
-        live_occupancy_coarse: true
-        live_occupancy_fine: true
+      Invert Rainbow: false
+      Max Color: 255; 60; 40
+      Min Color: 30; 80; 255
+      Name: Updated Live Map (Total)
+      Position Transformer: XYZ
+      Selectable: true
+      Size (Pixels): 2
+      Size (m): 0.08
+      Style: Points
       Topic:
         Depth: 1
         Durability Policy: Transient Local
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /ddlzd/occupancy
+        Value: /ddlzd/live_occupancy_points
+      Use Fixed Frame: true
+      Use rainbow: true
       Value: true
     - Class: rviz_default_plugins/MarkerArray
       Enabled: true

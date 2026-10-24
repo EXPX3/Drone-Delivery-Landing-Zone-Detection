@@ -163,12 +163,15 @@ class DynamicOccupancyMap:
     def baseline_voxel_count(self) -> int:
         return len(self.baseline_keys) + len(self.coarse_baseline_keys)
 
-    def update(self, points: np.ndarray, sensor_origin: np.ndarray | None = None) -> int:
+    def update(self, points: np.ndarray, sensor_origin: np.ndarray | None = None,
+               hazard_points: np.ndarray | None = None) -> int:
         points = np.asarray(points, dtype=np.float64)
+        hazard_source = points if hazard_points is None else np.asarray(hazard_points, dtype=np.float64)
         self.scan_index += 1
         interest = self._interest_mask(points)
         keys = unique_rows(voxel_keys(points[interest], self.resolution))
-        hazard_points = self._clustered_hazard_points(points[interest], sensor_origin)
+        hazard_interest = self._interest_mask(hazard_source)
+        hazard_points = self._clustered_hazard_points(hazard_source[hazard_interest], sensor_origin)
         hazard_positions: dict[tuple[int, int, int], list[np.ndarray]] = defaultdict(list)
         for point, row in zip(hazard_points, voxel_keys(hazard_points, self.resolution)):
             hazard_positions[tuple(int(value) for value in row)].append(point)
