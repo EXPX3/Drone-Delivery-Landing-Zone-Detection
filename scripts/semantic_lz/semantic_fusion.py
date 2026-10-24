@@ -50,9 +50,14 @@ class SemanticVoxelMemory:
         self._contradictions: dict[tuple[int, int, int], tuple[str, int]] = {}
 
     def update(self, points: np.ndarray, names: np.ndarray) -> None:
+        # One camera/LiDAR association is one observation. Multiple returns in
+        # the same voxel during that association must not fake temporal support.
+        observations: dict[tuple[int, int, int], str] = {}
         for point, name_value in zip(np.asarray(points), np.asarray(names, dtype=object)):
             name = str(name_value)
             key = tuple(np.floor(point / self.resolution_m).astype(np.int64))
+            observations.setdefault(key, name)
+        for key, name in observations.items():
             previous = self._labels.get(key)
             if previous is None or previous == name:
                 self._labels[key] = name

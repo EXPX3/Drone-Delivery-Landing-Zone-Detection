@@ -26,7 +26,7 @@ class SemanticFusionTests(unittest.TestCase):
         self.assertEqual(labels_at_pixels(result, pixels, valid).tolist(), [1, 0, 0])
 
     def test_semantic_memory_requires_confirmed_contradiction(self):
-        memory = SemanticVoxelMemory(resolution_m=0.2, contradiction_hits=2)
+        memory = SemanticVoxelMemory(resolution_m=0.2, contradiction_hits=2, confirmation_hits=2)
         point = np.array([[1.01, 2.01, 3.01]])
         memory.update(point, np.array(["person"], dtype=object))
         memory.update(point, np.array(["person"], dtype=object))
@@ -36,6 +36,17 @@ class SemanticFusionTests(unittest.TestCase):
         memory.update(point, np.array(["cargo_box"], dtype=object))
         _, colors = memory.point_cloud()
         self.assertEqual(colors.tolist(), [[255, 255, 0]])
+
+    def test_one_frame_cannot_confirm_with_duplicate_returns(self):
+        memory = SemanticVoxelMemory(resolution_m=0.2, confirmation_hits=2)
+        points = np.array([[1.01, 2.01, 3.01], [1.02, 2.02, 3.02]])
+        names = np.array(["person", "person"], dtype=object)
+        memory.update(points, names)
+        visible, _ = memory.point_cloud()
+        self.assertEqual(len(visible), 0)
+        memory.update(points[:1], names[:1])
+        visible, _ = memory.point_cloud()
+        self.assertEqual(len(visible), 1)
 
 
 if __name__ == "__main__":

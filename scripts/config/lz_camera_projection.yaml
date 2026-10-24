@@ -29,7 +29,11 @@ dynamic_occupancy:
   resolution_m: 0.20
   coarse_resolution_m: 1.00
   interest_padding_m: 1.0
-  confirmation_hits: 2
+  confirmation_hits: 3
+  # Reject terrain returns that project through an object mask. These were the
+  # dominant source of the growing horizontal semantic halo.
+  minimum_height_above_ground_m: 0.12
+  maximum_height_above_ground_m: 3.0
   confirmation_window_scans: 3
   maximum_lidar_range_m: 80.0
   rolling_horizontal_radius_m: 10.0

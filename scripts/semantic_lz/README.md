@@ -35,8 +35,10 @@ erase a label. A voxel changes color only after two positive, contradictory
 classifications at that location; this avoids flicker when a person or box is
 temporarily outside the image or missed by the detector.
 
-Semantic voxels require two repeated observations before display, suppressing
-single-pass projection outliers. Camera projection uses the same strip-optimized
+Semantic voxels require three independent frame observations before display;
+duplicate returns from one scan count only once. Points below 0.12 m or above
+3.0 m relative to the Bayern terrain model are rejected, removing ground returns
+that project through an object silhouette. Camera projection uses the same strip-optimized
 body trajectory as the deskewed LiDAR map; mixing raw camera poses with optimized
 LiDAR poses previously caused repeated observations to spread into a halo.
 

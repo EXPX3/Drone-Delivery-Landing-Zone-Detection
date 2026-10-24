@@ -562,8 +562,21 @@ class LandingZoneRvizReplay(Node):
                     labels = labels_at_pixels(semantic_result, pixels, in_front)
                     selected = labels > 0
                     if np.any(selected):
+                        semantic_points = latest_lidar_points[selected]
                         names = np.asarray(semantic_result.class_names, dtype=object)[labels[selected] - 1]
-                        self.semantic_memory.update(latest_lidar_points[selected], names)
+                        minimum_height = float(semantic.get("minimum_height_above_ground_m", 0.12))
+                        maximum_height = float(semantic.get("maximum_height_above_ground_m", 3.0))
+                        ground = np.asarray([
+                            self.terrain.height(float(point[0]), float(point[1]))
+                            for point in semantic_points
+                        ], dtype=object)
+                        height_ok = np.asarray([
+                            value is not None and minimum_height <= point[2] - float(value) <= maximum_height
+                            for point, value in zip(semantic_points, ground)
+                        ])
+                        semantic_points = semantic_points[height_ok]
+                        names = names[height_ok]
+                        self.semantic_memory.update(semantic_points, names)
                         semantic_counts = {
                             name: int(np.count_nonzero(names == name)) for name in set(names)
                         }
