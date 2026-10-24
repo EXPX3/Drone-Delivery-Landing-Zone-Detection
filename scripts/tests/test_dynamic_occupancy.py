@@ -139,6 +139,44 @@ class DynamicOccupancyTests(unittest.TestCase):
         self.assertEqual(layers["coarse"][1], 2.0)
         self.assertEqual(len(occupancy.classified_zones()[1]), 1)
 
+    def test_point_cluster_requires_two_of_three_scans(self):
+        clustering = {
+            "enabled": True, "radius_m": 0.25,
+            "minimum_points_near": 5, "minimum_points_mid": 4,
+            "minimum_points_far": 3, "near_range_m": 10.0,
+            "mid_range_m": 20.0, "far_range_m": 40.0,
+            "beyond_far_confirmation_hits": 3,
+        }
+        occupancy = DynamicOccupancyMap(
+            np.empty((0, 3)), [zone()], resolution=0.2, coarse_resolution=1.0,
+            obstacle_min_height_m=0.2, vertical_clearance_m=5.0,
+            min_obstacle_voxels=2, confirmation_window_scans=3, clustering=clustering,
+        )
+        cluster = np.array([
+            [1.01, 0.01, 10.40], [1.03, 0.02, 10.42], [1.05, 0.03, 10.41],
+            [1.07, 0.01, 10.43], [1.09, 0.02, 10.40],
+        ])
+        occupancy.update(cluster, np.zeros(3))
+        occupancy.update(np.empty((0, 3)), np.zeros(3))
+        self.assertEqual(len(occupancy.classified_zones()[1]), 0)
+        occupancy.update(cluster, np.zeros(3))
+        self.assertEqual(len(occupancy.classified_zones()[1]), 1)
+
+    def test_isolated_above_ground_points_do_not_block(self):
+        clustering = {
+            "enabled": True, "radius_m": 0.25,
+            "minimum_points_near": 5, "minimum_points_mid": 4,
+            "minimum_points_far": 3, "near_range_m": 10.0,
+            "mid_range_m": 20.0, "far_range_m": 40.0,
+            "beyond_far_confirmation_hits": 3,
+        }
+        occupancy = DynamicOccupancyMap(
+            np.empty((0, 3)), [zone()], resolution=0.2, coarse_resolution=1.0,
+            obstacle_min_height_m=0.2, min_obstacle_voxels=1, clustering=clustering,
+        )
+        occupancy.update(np.array([[1.0, 0.0, 10.5], [1.8, 0.0, 10.5]]), np.zeros(3))
+        self.assertEqual(len(occupancy.classified_zones()[1]), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

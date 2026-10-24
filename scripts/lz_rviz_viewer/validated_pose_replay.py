@@ -127,3 +127,9 @@ class ValidatedPoseReplay:
         local = transform_timed_points(body, relative_times, previous, self.poses[index])
         world = (self.world_from_local[:3, :3] @ local.T).T + self.world_from_local[:3, 3]
         return world, index, time_error
+
+    def sensor_origin(self, index: int) -> np.ndarray:
+        if self.world_from_local is None:
+            raise RuntimeError("World alignment must be initialized before requesting sensor origin")
+        position = self.poses[index, :3, 3]
+        return self.world_from_local[:3, :3] @ position + self.world_from_local[:3, 3]

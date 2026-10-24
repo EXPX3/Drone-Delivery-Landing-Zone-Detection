@@ -29,15 +29,17 @@ Live occupancy conservatively updates them:
 
 Two octree-style depths reduce update and rendering cost:
 
-- `0.35 m` fine voxels cover every landing circle, its 2 m wind/GNSS margin, and
+- `0.20 m` fine voxels cover every landing circle, its 2 m wind/GNSS margin, and
   1 m additional context. Only this layer can block or downgrade a candidate.
-- `1.40 m` coarse voxels represent all other areas for environmental context.
-- Three scan observations confirm a live voxel before publication or LZ effects.
+- `1.00 m` coarse voxels represent all other areas for environmental context.
+- Above-ground points are clustered within `0.25 m`; isolated returns are rejected.
+- Five points are required below 10 m range, four below 20 m, and three beyond it.
+- A hazard must occur in two of three scans; points beyond 40 m require three hits.
 - Point stride three, batched voxel uniqueness, spatial candidate indexing, 2 Hz map
   publication and 1 Hz zone publication bound processing cost.
 
-On the current Bayern cloud, this stores 250,273 baseline voxels versus 396,035 for
-a globally fine 0.35 m grid, a `36.8%` reduction while preserving decision regions.
+On the current Bayern cloud, this stores 414,572 baseline voxels versus 597,233 for
+a globally fine 0.20 m grid, a `30.6%` reduction while preserving decision regions.
 
 The live sensor does not create new flat candidates from obstacle endpoints. Adding
 new candidates requires rerunning region-growing surface analysis on an accumulated
@@ -123,17 +125,28 @@ Dynamic parameters are under `dynamic_occupancy` in
 `scripts/config/lz_camera_projection.yaml`:
 
 ```yaml
-resolution_m: 0.35
-coarse_resolution_m: 1.40
+resolution_m: 0.20
+coarse_resolution_m: 1.00
 interest_padding_m: 1.0
-confirmation_hits: 3
+confirmation_hits: 2
+confirmation_window_scans: 3
 maximum_lidar_range_m: 80.0
 point_stride: 3
 publish_hz: 2.0
 zone_publish_hz: 1.0
 gps_wind_margin_m: 2.0
-obstacle_min_height_m: 0.35
-vertical_clearance_m: 20.0
+obstacle_min_height_m: 0.20
+vertical_clearance_m: 5.0
+point_clustering:
+  enabled: true
+  radius_m: 0.25
+  minimum_points_near: 5
+  minimum_points_mid: 4
+  minimum_points_far: 3
+  near_range_m: 10.0
+  mid_range_m: 20.0
+  far_range_m: 40.0
+  beyond_far_confirmation_hits: 3
 zone_visual_lift_m: 0.65
 validated_pose_replay:
   enabled: true
@@ -152,7 +165,7 @@ and final global refinement remain delayed until a repeated area is observed.
   -m unittest discover -s scripts/tests -v
 ```
 
-Expected result: 24 tests pass.
+Expected result: 26 tests pass.
 
 ## Synchronization Evidence
 

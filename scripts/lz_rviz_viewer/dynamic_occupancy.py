@@ -102,7 +102,8 @@ class DynamicOccupancyMap:
                  gps_margin_m: float = 2.0, obstacle_min_height_m: float = 0.35,
                  vertical_clearance_m: float = 20.0, min_obstacle_voxels: int = 3,
                  coarse_resolution: float | None = None,
-                 interest_padding_m: float = 1.0) -> None:
+                 interest_padding_m: float = 1.0, confirmation_window_scans: int = 3,
+                 clustering: dict | None = None) -> None:
         self.resolution = float(resolution)
         self.coarse_resolution = float(coarse_resolution or resolution)
         if self.coarse_resolution < self.resolution:
@@ -111,6 +112,8 @@ class DynamicOccupancyMap:
         self.obstacle_min_height_m = float(obstacle_min_height_m)
         self.vertical_clearance_m = float(vertical_clearance_m)
         self.min_obstacle_voxels = int(min_obstacle_voxels)
+        self.confirmation_window_scans = int(confirmation_window_scans)
+        self.clustering = clustering or {"enabled": False}
         self.interest_padding_m = float(interest_padding_m)
         self._zone_centers = np.asarray(
             [[float(zone["x"]), float(zone["y"])] for zone in zones], dtype=np.float64,
@@ -129,6 +132,9 @@ class DynamicOccupancyMap:
         self.coarse_baseline_keys = {tuple(int(v) for v in row) for row in coarse_baseline}
         self.live_hits: dict[tuple[int, int, int], int] = {}
         self.coarse_live_hits: dict[tuple[int, int, int], int] = {}
+        self.hazard_observations: dict[tuple[int, int, int], list[int]] = defaultdict(list)
+        self.confirmed_hazards: set[tuple[int, int, int]] = set()
+        self.scan_index = 0
         self.zones = zones
         self.evidence = {int(zone["rank"]): CandidateEvidence() for zone in zones}
         self._cell_size = max(5.0, max(float(zone["radius"]) for zone in zones) + self.gps_margin_m)
@@ -153,10 +159,16 @@ class DynamicOccupancyMap:
     def baseline_voxel_count(self) -> int:
         return len(self.baseline_keys) + len(self.coarse_baseline_keys)
 
-    def update(self, points: np.ndarray) -> int:
+    def update(self, points: np.ndarray, sensor_origin: np.ndarray | None = None) -> int:
         points = np.asarray(points, dtype=np.float64)
+        self.scan_index += 1
         interest = self._interest_mask(points)
         keys = unique_rows(voxel_keys(points[interest], self.resolution))
+        hazard_points = self._clustered_hazard_points(points[interest], sensor_origin)
+        hazard_keys = {
+            tuple(int(value) for value in row)
+            for row in unique_rows(voxel_keys(hazard_points, self.resolution))
+        }
         coarse_keys = unique_rows(voxel_keys(points[~interest], self.coarse_resolution))
         for row in coarse_keys:
             key = tuple(int(v) for v in row)
@@ -166,10 +178,23 @@ class DynamicOccupancyMap:
             key = tuple(int(v) for v in row)
             hits = self.live_hits.get(key, 0) + 1
             self.live_hits[key] = hits
-            if hits != self.min_obstacle_voxels or key in self.baseline_keys:
+            if key not in hazard_keys or key in self.baseline_keys or key in self.confirmed_hazards:
                 continue
-            changed += 1
+            observations = self.hazard_observations[key]
+            observations.append(self.scan_index)
+            cutoff = self.scan_index - self.confirmation_window_scans + 1
+            while observations and observations[0] < cutoff:
+                observations.pop(0)
             center = (np.asarray(key, dtype=np.float64) + 0.5) * self.resolution
+            required_hits = self.min_obstacle_voxels
+            if sensor_origin is not None:
+                distance_to_sensor = float(np.linalg.norm(center[:2] - np.asarray(sensor_origin)[:2]))
+                if distance_to_sensor > float(self.clustering.get("far_range_m", np.inf)):
+                    required_hits = int(self.clustering.get("beyond_far_confirmation_hits", required_hits))
+            if len(observations) < required_hits:
+                continue
+            self.confirmed_hazards.add(key)
+            changed += 1
             grid_key = (int(np.floor(center[0] / self._cell_size)),
                         int(np.floor(center[1] / self._cell_size)))
             for zone in self._zone_grid.get(grid_key, []):
@@ -187,6 +212,60 @@ class DynamicOccupancyMap:
                     evidence.margin_voxels.add(key)
                     evidence.nearest_obstacle_m = min(evidence.nearest_obstacle_m, distance)
         return changed
+
+    def _clustered_hazard_points(self, points: np.ndarray,
+                                 sensor_origin: np.ndarray | None) -> np.ndarray:
+        if not len(points):
+            return points
+        distance, zone_index = self._zone_tree.query(points[:, :2], k=1)
+        zone_z = np.asarray([float(self.zones[index]["z"]) for index in zone_index])
+        reach = np.asarray([
+            float(self.zones[index]["radius"]) + self.gps_margin_m for index in zone_index
+        ])
+        dz = points[:, 2] - zone_z
+        keep = (
+            (distance <= reach) & (dz >= self.obstacle_min_height_m)
+            & (dz <= self.vertical_clearance_m)
+        )
+        hazards = points[keep]
+        if not self.clustering.get("enabled", False) or len(hazards) == 0:
+            return hazards
+
+        radius = float(self.clustering["radius_m"])
+        tree = cKDTree(hazards)
+        pairs = tree.query_pairs(radius, output_type="ndarray")
+        parent = np.arange(len(hazards))
+
+        def find(value: int) -> int:
+            while parent[value] != value:
+                parent[value] = parent[parent[value]]
+                value = int(parent[value])
+            return value
+
+        for first, second in pairs:
+            root_first, root_second = find(int(first)), find(int(second))
+            if root_first != root_second:
+                parent[root_second] = root_first
+        labels = np.asarray([find(index) for index in range(len(hazards))])
+        unique, counts = np.unique(labels, return_counts=True)
+        accepted: list[np.ndarray] = []
+        for label, count in zip(unique, counts):
+            cluster = hazards[labels == label]
+            if sensor_origin is None:
+                horizontal_range = 0.0
+            else:
+                horizontal_range = float(np.linalg.norm(
+                    np.median(cluster[:, :2], axis=0) - np.asarray(sensor_origin)[:2]
+                ))
+            if horizontal_range <= float(self.clustering["near_range_m"]):
+                minimum = int(self.clustering["minimum_points_near"])
+            elif horizontal_range <= float(self.clustering["mid_range_m"]):
+                minimum = int(self.clustering["minimum_points_mid"])
+            else:
+                minimum = int(self.clustering["minimum_points_far"])
+            if count >= minimum:
+                accepted.append(cluster)
+        return np.vstack(accepted) if accepted else np.empty((0, 3), dtype=np.float64)
 
     def occupancy_layers(self, include_baseline: bool = True,
                          confirmed_only: bool = True) -> list[tuple[str, np.ndarray, float]]:

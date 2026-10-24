@@ -159,6 +159,8 @@ class LandingZoneRvizReplay(Node):
             min_obstacle_voxels=int(dynamic["confirmation_hits"]),
             coarse_resolution=float(dynamic["coarse_resolution_m"]),
             interest_padding_m=float(dynamic["interest_padding_m"]),
+            confirmation_window_scans=int(dynamic["confirmation_window_scans"]),
+            clustering=dynamic.get("point_clustering"),
         )
         self.active_zones, self.blocked_zones = self.occupancy.classified_zones()
 
@@ -373,6 +375,7 @@ class LandingZoneRvizReplay(Node):
                             ortho_points, pose_index, pose_time_error = self.validated_replay.transform(
                                 message, bag_time, lidar_stride, 1.0, max_lidar_range,
                             )
+                            lidar_origin = self.validated_replay.sensor_origin(pose_index)
                         else:
                             lidar_points = pointcloud2_xyz(message)[::lidar_stride]
                             ranges = np.linalg.norm(lidar_points, axis=1)
@@ -386,11 +389,15 @@ class LandingZoneRvizReplay(Node):
                             ortho_points = apply_centered_transform(
                                 ortho_points, self.lidar_correction.matrix, self.lidar_registration_origin,
                             )
+                            lidar_origin = apply_centered_transform(
+                                transform_points(map_to_ortho, map_to_lidar.translation[None, :]),
+                                self.lidar_correction.matrix, self.lidar_registration_origin,
+                            )[0]
                             pose_index, pose_time_error = lidar_frame_number, 0.0
                     except LookupError as error:
                         self.get_logger().warning(str(error))
                         continue
-                    changed = self.occupancy.update(ortho_points)
+                    changed = self.occupancy.update(ortho_points, lidar_origin)
                     lidar_frame_number += 1
                     if changed:
                         self.active_zones, self.blocked_zones = self.occupancy.classified_zones()
