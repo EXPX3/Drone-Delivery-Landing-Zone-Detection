@@ -42,6 +42,12 @@ that project through an object silhouette. Camera projection uses the same strip
 body trajectory as the deskewed LiDAR map; mixing raw camera poses with optimized
 LiDAR poses previously caused repeated observations to spread into a halo.
 
+After temporal and geometric confirmation, semantic person/box/vehicle voxels
+are also persistent landing-safety evidence. A candidate whose footprint contains
+one is blocked immediately; a candidate within the configured 2 m GNSS/wind
+margin is downgraded to risky. Image recognition therefore supplements sparse
+LiDAR occupancy but never makes a geometrically blocked candidate safer.
+
 Generated weights and experiment images live under
 `pcds/semantic_experiment/` and remain outside Git.
 

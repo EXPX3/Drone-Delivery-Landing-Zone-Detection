@@ -81,6 +81,18 @@ class DynamicOccupancyTests(unittest.TestCase):
         self.assertEqual(active[0]["category"], "risky")
         self.assertEqual(active[0]["dynamic_state"], "margin")
 
+    def test_confirmed_semantic_obstacle_blocks_candidate(self):
+        occupancy = DynamicOccupancyMap(
+            np.empty((0, 3)), [zone()], resolution=0.2,
+            obstacle_min_height_m=0.15, min_obstacle_voxels=3,
+        )
+        changed = occupancy.add_confirmed_semantic_obstacles(
+            np.array([[0.5, 0.0, 10.5]]),
+        )
+        active, blocked = occupancy.classified_zones()
+        self.assertEqual(changed, 1)
+        self.assertEqual((len(active), len(blocked)), (0, 1))
+
     def test_baseline_voxel_does_not_create_dynamic_obstacle(self):
         point = np.array([[1.0, 0.0, 10.0]])
         occupancy = DynamicOccupancyMap(

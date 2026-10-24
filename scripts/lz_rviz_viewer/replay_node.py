@@ -583,6 +583,12 @@ class LandingZoneRvizReplay(Node):
                 if semantic_result is not None:
                     frame = colorize_frame(frame, semantic_result)
                 semantic_points, semantic_colors = self.semantic_memory.point_cloud()
+                semantic_zone_changes = self.occupancy.add_confirmed_semantic_obstacles(
+                    semantic_points,
+                )
+                if semantic_zone_changes:
+                    self.active_zones, self.blocked_zones = self.occupancy.classified_zones()
+                    self.static_pub.publish(self.zone_markers(timestamp))
                 semantic_cloud = colored_point_cloud_message(
                     semantic_points, semantic_colors, self.origin,
                 )

@@ -340,6 +340,31 @@ class DynamicOccupancyMap:
                 active.append(zone)
         return active, blocked
 
+    def add_confirmed_semantic_obstacles(self, points: np.ndarray) -> int:
+        """Apply temporally confirmed semantic points as persistent safety evidence."""
+        changed = 0
+        for point in np.asarray(points, dtype=np.float64):
+            key = tuple(int(value) for value in np.floor(point / self.resolution))
+            grid_key = (int(np.floor(point[0] / self._cell_size)),
+                        int(np.floor(point[1] / self._cell_size)))
+            for zone in self._zone_grid.get(grid_key, []):
+                dz = point[2] - float(zone["z"])
+                if dz < self.obstacle_min_height_m or dz > self.vertical_clearance_m:
+                    continue
+                distance = float(np.hypot(point[0] - float(zone["x"]),
+                                          point[1] - float(zone["y"])))
+                evidence = self.evidence[int(zone["rank"])]
+                target = None
+                if distance <= float(zone["radius"]):
+                    target = evidence.blocked_voxels
+                elif distance <= float(zone["radius"]) + self.gps_margin_m:
+                    target = evidence.margin_voxels
+                if target is not None and key not in target:
+                    target.add(key)
+                    evidence.nearest_obstacle_m = min(evidence.nearest_obstacle_m, distance)
+                    changed += 1
+        return changed
+
     def occupied_centers(self, include_baseline: bool = True, confirmed_only: bool = True) -> np.ndarray:
         layers = self.occupancy_layers(include_baseline, confirmed_only)
         populated = [centers for _, centers, _ in layers if len(centers)]
