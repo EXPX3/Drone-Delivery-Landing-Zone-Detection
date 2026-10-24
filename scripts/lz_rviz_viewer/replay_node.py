@@ -27,7 +27,9 @@ sys.path.insert(0, str(SCRIPTS))
 from lz_bag_replay_viewer.replay_server import (  # noqa: E402
     camera_footprint, displayed_zone_ring, orthometric_from_map,
 )
-from lz_camera_projection import compose, load_landing_zones, scaled_camera_matrix, transform_points  # noqa: E402
+from lz_camera_projection import (  # noqa: E402
+    compose, load_landing_zones, project_optical_points, scaled_camera_matrix, transform_points,
+)
 from lz_rviz_viewer.dynamic_occupancy import (  # noqa: E402
     apply_centered_transform, DynamicOccupancyMap, interpolate_gps, pointcloud2_xyz,
     TerrainHeightModel,
@@ -36,6 +38,9 @@ from lz_rviz_viewer.validated_pose_replay import ValidatedPoseReplay  # noqa: E4
 from project_lz_into_bag_camera import (  # noqa: E402
     chain_transform, config_transform, decode_image, draw_zones, fit_utm_to_map,
     open_reader, read_pose_and_gps, require_ros, stamp_ns,
+)
+from semantic_lz.semantic_fusion import (  # noqa: E402
+    CLASS_COLORS_RGB, OpenVocabularySegmenter, colorize_frame, labels_at_pixels,
 )
 
 FRAME_ID = "lz_world"
@@ -85,6 +90,31 @@ def point_cloud_message(points: np.ndarray, origin: np.ndarray) -> PointCloud2:
     message.row_step = message.point_step * message.width
     message.is_dense = bool(np.isfinite(local).all())
     message.data = local.tobytes()
+    return message
+
+
+def colored_point_cloud_message(points: np.ndarray, colors: np.ndarray,
+                                origin: np.ndarray) -> PointCloud2:
+    local = np.ascontiguousarray(points - origin, dtype=np.float32)
+    packed = ((colors[:, 0].astype(np.uint32) << 16)
+              | (colors[:, 1].astype(np.uint32) << 8)
+              | colors[:, 2].astype(np.uint32))
+    records = np.empty(len(local), dtype=[("x", "<f4"), ("y", "<f4"),
+                                           ("z", "<f4"), ("rgb", "<u4")])
+    records["x"], records["y"], records["z"], records["rgb"] = (
+        local[:, 0], local[:, 1], local[:, 2], packed,
+    )
+    message = PointCloud2(header=Header(frame_id=FRAME_ID), height=1, width=len(records))
+    message.fields = [
+        PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
+        PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
+        PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
+        PointField(name="rgb", offset=12, datatype=PointField.UINT32, count=1),
+    ]
+    message.point_step = 16
+    message.row_step = 16 * len(records)
+    message.is_dense = True
+    message.data = records.tobytes()
     return message
 
 
@@ -178,6 +208,17 @@ class LandingZoneRvizReplay(Node):
             PointCloud2, "/ddlzd/live_occupancy_points", durable,
         )
         self.image_pub = self.create_publisher(Image, "/ddlzd/camera_overlay", live)
+        self.semantic_pub = self.create_publisher(
+            PointCloud2, "/ddlzd/semantic_obstacles", durable,
+        )
+        semantic = self.config.get("semantic_segmentation", {})
+        self.segmenter = None
+        if bool(semantic.get("enabled", False)):
+            self.segmenter = OpenVocabularySegmenter(
+                self.args.semantic_weights, list(semantic["prompts"]),
+                confidence=float(semantic["confidence"]),
+                image_size=int(semantic["image_size"]), device=str(semantic["device"]),
+            )
         self.cloud_pub.publish(point_cloud_message(cloud, self.origin))
         self.static_pub.publish(self.zone_markers(0))
         self.get_logger().info(
@@ -351,6 +392,8 @@ class LandingZoneRvizReplay(Node):
             trajectory: list[np.ndarray] = []
             frame_number = 0
             lidar_frame_number = 0
+            latest_lidar_points = np.empty((0, 3), dtype=np.float64)
+            latest_lidar_stamp = 0
             pose_index = -1
             pose_time_error = 0.0
             interval_ns = int(1e9 / self.args.fps)
@@ -413,6 +456,8 @@ class LandingZoneRvizReplay(Node):
                         self.get_logger().warning(str(error))
                         continue
                     transformed_at = time.perf_counter()
+                    latest_lidar_points = ortho_points
+                    latest_lidar_stamp = timestamp
                     horizontal_distance = np.linalg.norm(
                         ortho_points[:, :2] - lidar_origin[:2], axis=1,
                     )
@@ -477,10 +522,40 @@ class LandingZoneRvizReplay(Node):
                     float(self.config["synchronization"]["max_tf_gap_s"]),
                 )
                 map_to_optical = compose(map_to_mount, config_transform(self.config["camera"]["mount_to_optical"]))
+                semantic_result = None
+                semantic = self.config.get("semantic_segmentation", {})
+                inference_stride = int(semantic.get("inference_stride", 1))
+                if self.segmenter is not None and frame_number % inference_stride == 0:
+                    semantic_result = self.segmenter.predict(frame)
                 ranks: list[int] = []
                 draw_zones(frame, self.active_zones, map_to_optical, utm_to_map, camera_matrix,
                            distortion, vertical_offset, 0.25, visible_ranks_out=ranks)
                 ortho_to_optical = compose(map_to_ortho, map_to_optical)
+                semantic_counts: dict[str, int] = {}
+                if (semantic_result is not None and len(latest_lidar_points)
+                        and abs(timestamp - latest_lidar_stamp) / 1e9
+                        <= float(semantic.get("maximum_lidar_age_s", 0.15))):
+                    optical_points = transform_points(
+                        ortho_to_optical.inverse(), latest_lidar_points,
+                    )
+                    pixels, in_front = project_optical_points(
+                        optical_points, camera_matrix, distortion,
+                    )
+                    labels = labels_at_pixels(semantic_result, pixels, in_front)
+                    selected = labels > 0
+                    if np.any(selected):
+                        names = np.asarray(semantic_result.class_names, dtype=object)[labels[selected] - 1]
+                        colors = np.asarray([CLASS_COLORS_RGB[name] for name in names], dtype=np.uint8)
+                        cloud_message = colored_point_cloud_message(
+                            latest_lidar_points[selected], colors, self.origin,
+                        )
+                        ros_stamp(cloud_message, timestamp)
+                        self.semantic_pub.publish(cloud_message)
+                        semantic_counts = {
+                            name: int(np.count_nonzero(names == name)) for name in set(names)
+                        }
+                if semantic_result is not None:
+                    frame = colorize_frame(frame, semantic_result)
                 map_to_base = chain_transform(
                     tf_data, [self.config["frames"]["map"], self.config["frames"]["base"]], timestamp,
                     float(self.config["synchronization"]["max_tf_gap_s"]),
@@ -499,6 +574,8 @@ class LandingZoneRvizReplay(Node):
                 text = f"Frame {frame_number:06d} | t={relative:.3f}s | ROS {timestamp} ns"
                 status = (f"LZ active {len(self.active_zones)} | blocked {len(self.blocked_zones)} | "
                           f"LiDAR {lidar_frame_number} | GNSS/TF {geographic_error:.2f} m")
+                if self.segmenter is not None:
+                    status += f" | semantic {semantic_counts or 'none'}"
                 if self.validated_replay is not None:
                     status += (f" | corrected {max(0, pose_index + 1)}/{len(self.validated_replay.poses)} "
                                f"dt {pose_time_error * 1e3:.1f}ms")
@@ -542,6 +619,8 @@ def main() -> int:
                         default=root / "pcds/bag_only_strip_optimized_poses.npz")
     parser.add_argument("--mapping-config", type=Path,
                         default=root / "scripts/bag_lio_mapping/kiss_icp_config.yaml")
+    parser.add_argument("--semantic-weights", type=str,
+                        default=str(root / "pcds/semantic_experiment/models/yoloe-11s-seg.pt"))
     args = parser.parse_args()
     rclpy.init()
     node = LandingZoneRvizReplay(args)

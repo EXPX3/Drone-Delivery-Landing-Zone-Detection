@@ -103,3 +103,13 @@ output:
   fps: 15.0
   fill_alpha: 0.35
 
+semantic_segmentation:
+  enabled: true
+  # Open-vocabulary prompts cover objects absent from COCO's fixed taxonomy.
+  prompts: [person, black cargo box, white cargo box, cardboard package, car]
+  confidence: 0.05
+  image_size: 1280
+  device: 0
+  inference_stride: 3
+  maximum_lidar_age_s: 0.15
+
