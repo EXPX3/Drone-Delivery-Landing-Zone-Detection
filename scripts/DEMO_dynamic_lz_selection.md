@@ -36,7 +36,8 @@ Two octree-style depths reduce update and rendering cost:
 - Five points are required below 10 m range, four below 20 m, and three beyond it.
 - A hazard must occur in two of three scans; points beyond 40 m require three hits.
 - Point stride three, batched voxel uniqueness, spatial candidate indexing, 2 Hz map
-  publication and 1 Hz zone publication bound processing cost.
+  publication and 5 Hz zone publication bound processing while keeping visible
+  candidate-state latency below approximately 0.3 s.
 
 On the current Bayern cloud, this stores 414,572 baseline voxels versus 597,233 for
 a globally fine 0.20 m grid, a `30.6%` reduction while preserving decision regions.
@@ -133,7 +134,7 @@ confirmation_window_scans: 3
 maximum_lidar_range_m: 80.0
 point_stride: 3
 publish_hz: 2.0
-zone_publish_hz: 1.0
+zone_publish_hz: 5.0
 gps_wind_margin_m: 2.0
 obstacle_min_height_m: 0.15
 vertical_clearance_m: 5.0

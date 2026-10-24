@@ -34,7 +34,7 @@ dynamic_occupancy:
   maximum_lidar_range_m: 80.0
   point_stride: 3
   publish_hz: 2.0
-  zone_publish_hz: 1.0
+  zone_publish_hz: 5.0
   max_visualized_voxels: 120000
   # Reuse the risk model's wind/GNSS margin. Confirmed occupancy inside a zone
   # blocks it; occupancy inside this outer margin downgrades it to risky.
