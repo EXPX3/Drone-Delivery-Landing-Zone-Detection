@@ -337,7 +337,7 @@ class LandingZoneRvizReplay(Node):
 
     def dynamic_markers(self, timestamp_ns: int, visible_zones: list[dict], trajectory: list[np.ndarray],
                         uav: np.ndarray, camera: np.ndarray, footprint: list[list[float]],
-                        frame_number: int, tf_uav: np.ndarray) -> MarkerArray:
+                        frame_number: int, gnss_uav: np.ndarray) -> MarkerArray:
         clear = Marker()
         clear.header.frame_id = FRAME_ID
         ros_stamp(clear, timestamp_ns)
@@ -375,7 +375,7 @@ class LandingZoneRvizReplay(Node):
 
         registration = marker(6, "geographic_registration", Marker.LINE_LIST,
                               (1.0, 0.2, 0.8, 1.0), 0.09, timestamp_ns)
-        for value in (uav, tf_uav):
+        for value in (uav, gnss_uav):
             local = value - self.origin
             registration.points.append(Point(x=float(local[0]), y=float(local[1]), z=float(local[2])))
         return MarkerArray(markers=[clear, pink, trail, aircraft, outline, rays, label, registration])
@@ -559,13 +559,15 @@ class LandingZoneRvizReplay(Node):
                     float(self.config["synchronization"]["max_tf_gap_s"]),
                 )
                 map_to_optical = compose(map_to_mount, config_transform(self.config["camera"]["mount_to_optical"]))
+                corrected_body_pose = None
                 if self.validated_replay is not None and corrected_alignment_ready:
                     map_to_base = chain_transform(
                         tf_data, [self.config["frames"]["map"], self.config["frames"]["base"]],
                         timestamp, float(self.config["synchronization"]["max_tf_gap_s"]),
                     )
                     body_to_mount = np.linalg.inv(map_to_base.matrix) @ map_to_mount.matrix
-                    world_to_mount = self.validated_replay.world_body_pose(timestamp) @ body_to_mount
+                    corrected_body_pose = self.validated_replay.world_body_pose(timestamp)
+                    world_to_mount = corrected_body_pose @ body_to_mount
                     ortho_to_optical = compose(
                         transform_from_matrix(world_to_mount),
                         config_transform(self.config["camera"]["mount_to_optical"]),
@@ -670,9 +672,11 @@ class LandingZoneRvizReplay(Node):
                     tf_data, [self.config["frames"]["map"], self.config["frames"]["base"]], timestamp,
                     float(self.config["synchronization"]["max_tf_gap_s"]),
                 )
-                tf_uav = transform_points(map_to_ortho, map_to_base.translation[None, :])[0]
-                uav = interpolate_gps(gps, timestamp, vertical_offset, gps_times)
-                geographic_error = float(np.linalg.norm(uav[:2] - tf_uav[:2]))
+                raw_tf_uav = transform_points(map_to_ortho, map_to_base.translation[None, :])[0]
+                gnss_uav = interpolate_gps(gps, timestamp, vertical_offset, gps_times)
+                uav = (corrected_body_pose[:3, 3].copy()
+                       if corrected_body_pose is not None else raw_tf_uav)
+                geographic_error = float(np.linalg.norm(gnss_uav[:2] - uav[:2]))
                 if not trajectory or np.linalg.norm(uav - trajectory[-1]) > 0.1:
                     trajectory.append(uav)
                 footprint, _ = camera_footprint(
@@ -683,7 +687,7 @@ class LandingZoneRvizReplay(Node):
                 relative = (timestamp - first_stamp) / 1e9
                 text = f"Frame {frame_number:06d} | t={relative:.3f}s | ROS {timestamp} ns"
                 status = (f"LZ active {len(self.active_zones)} | blocked {len(self.blocked_zones)} | "
-                          f"LiDAR {lidar_frame_number} | GNSS/TF {geographic_error:.2f} m")
+                          f"LiDAR {lidar_frame_number} | GNSS/corrected pose {geographic_error:.2f} m")
                 if self.segmenter is not None:
                     status += f" | semantic {semantic_counts or 'none'}"
                 if self.validated_replay is not None:
@@ -697,7 +701,7 @@ class LandingZoneRvizReplay(Node):
                 zones_by_rank = {int(zone["rank"]): zone for zone in self.active_zones}
                 replay_markers = self.dynamic_markers(
                     timestamp, [zones_by_rank[rank] for rank in ranks if rank in zones_by_rank], trajectory,
-                    uav, ortho_to_optical.translation, footprint, frame_number, tf_uav,
+                    uav, ortho_to_optical.translation, footprint, frame_number, gnss_uav,
                 )
                 if self.args.metrics_json is None:
                     self.publish_image(frame, timestamp)

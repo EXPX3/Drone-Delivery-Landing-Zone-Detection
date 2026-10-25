@@ -75,11 +75,12 @@ docker logs -f ddlzd-lz-rviz
 - `Landing Zones`: current active categories and blocked-zone crosses.
 - `Live Camera Geometry`: trajectory, UAV, frustum, footprint, and camera-visible LZs.
 
-The UAV sphere and trajectory use GNSS interpolated at the exact camera-image
-timestamp. The camera/frustum use the recorded TF chain. A magenta residual line
-connects the GNSS UAV position to the TF-derived base position, and the image status
-reports the current horizontal `GNSS/TF` residual. The frame number and ROS timestamp
-shown above the UAV are identical to those burned into the camera image.
+The UAV sphere, trajectory, camera/frustum, and corrected LiDAR scans all use the
+same frozen strip-optimized body pose at the exact camera-image timestamp. A magenta
+residual line connects that corrected pose to the independently interpolated GNSS
+position, and the image status reports the horizontal `GNSS/corrected pose` residual.
+The frame number and ROS timestamp shown above the UAV are identical to those burned
+into the camera image.
 
 Frustum corner rays are intersected iteratively with the classified Bayern ground
 cloud, not a single flat elevation. Each resulting 3D corner is verified to reproject
