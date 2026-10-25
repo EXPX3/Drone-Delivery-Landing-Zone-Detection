@@ -473,7 +473,7 @@ class LandingZoneRvizReplay(Node):
                                               z=float(local[2] + 1.35))
             radial = np.linalg.norm(centers[:, :2] - center[:2], axis=1)
             text_marker.text = (
-                f"{track.class_name} #{track.track_id} | P95 {np.percentile(radial, 95):.2f} m\n"
+                f"{track.class_name} #{track.display_id} | P95 {np.percentile(radial, 95):.2f} m\n"
                 f"Cov XY [m^2] [{covariance[0, 0]:.3f} {covariance[0, 1]:+.3f}; "
                 f"{covariance[1, 0]:+.3f} {covariance[1, 1]:.3f}]"
             )

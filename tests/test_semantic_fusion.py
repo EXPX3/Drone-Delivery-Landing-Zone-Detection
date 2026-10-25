@@ -105,6 +105,20 @@ class SemanticFusionTests(unittest.TestCase):
         tracker.expire(4)
         self.assertEqual([track.track_id for track in tracker.tracks], [2])
 
+    def test_only_confirmed_tracks_consume_display_ids(self):
+        tracker = SemanticObjectTracker(
+            confirmation_frames=2, association_radius_m=0.25, maximum_age_frames=0,
+        )
+        cargo = np.array(["cargo_box"], dtype=object)
+        tracker.update(np.array([[0.0, 0.0, 0.5]]), cargo, frame_index=1)
+        tracker.update(np.array([[2.0, 0.0, 0.5]]), cargo, frame_index=2)
+        tracker.update(np.array([[2.0, 0.0, 0.5]]), cargo, frame_index=3)
+        tracker.update(np.array([[4.0, 0.0, 0.5]]), cargo, frame_index=4)
+        tracker.update(np.array([[4.0, 0.0, 0.5]]), cargo, frame_index=5)
+        self.assertEqual([track.track_id for track in tracker.confirmed_tracks()], [2, 3])
+        self.assertEqual([track.display_id for track in tracker.confirmed_tracks()], [1, 2])
+        self.assertIsNone(tracker.tracks[0].display_id)
+
 
 if __name__ == "__main__":
     unittest.main()

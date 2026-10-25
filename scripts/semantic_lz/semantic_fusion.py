@@ -98,6 +98,7 @@ class SemanticObjectTrack:
     last_frame: int = 0
     confidence: float = 0.0
     centers: list[np.ndarray] | None = None
+    display_id: int | None = None
 
     def __post_init__(self) -> None:
         if self.centers is None:
@@ -118,6 +119,14 @@ class SemanticObjectTracker:
         self.history_size = int(history_size)
         self.tracks: list[SemanticObjectTrack] = []
         self._next_id = 1
+        self._next_display_id: dict[str, int] = {}
+
+    def _confirm_display_id(self, track: SemanticObjectTrack) -> None:
+        if track.observations < self.confirmation_frames or track.display_id is not None:
+            return
+        next_id = self._next_display_id.get(track.class_name, 1)
+        track.display_id = next_id
+        self._next_display_id[track.class_name] = next_id + 1
 
     def _clusters(self, points: np.ndarray, names: np.ndarray) -> list[tuple[str, np.ndarray]]:
         output: list[tuple[str, np.ndarray]] = []
@@ -170,12 +179,15 @@ class SemanticObjectTracker:
                 track.confidence = max(track.confidence, cluster_confidence)
                 track.centers.append(center.copy())
                 track.centers = track.centers[-self.history_size:]
+                self._confirm_display_id(track)
                 used_tracks.add(index)
             else:
-                self.tracks.append(SemanticObjectTrack(
+                track = SemanticObjectTrack(
                     self._next_id, class_name, center.copy(), cluster.copy(),
                     last_frame=int(frame_index), confidence=cluster_confidence,
-                ))
+                )
+                self._confirm_display_id(track)
+                self.tracks.append(track)
                 used_tracks.add(len(self.tracks) - 1)
                 self._next_id += 1
         self.expire(frame_index)
@@ -224,6 +236,7 @@ class SemanticObjectTracker:
                              if len(centers) > 1 else np.eye(2) * 0.01)
             output.append({
                 "track_id": track.track_id,
+                "display_id": track.display_id,
                 "class_name": track.class_name,
                 "observations": track.observations,
                 "confirmed": track.observations >= self.confirmation_frames,
