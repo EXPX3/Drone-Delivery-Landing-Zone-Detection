@@ -26,6 +26,75 @@ accepted observations. Person 1 accumulated 14 returns. The cargo-box result is
 therefore supported across repeated traverses; the person result is preliminary
 because only three temporally adjacent observations passed all gates.
 
+## Full Detection Funnel
+
+The unit in this section is one image detection, not one unique physical object.
+The complete bag produced 465 detections: 390 cargo-box, 65 person, and 10 vehicle
+detections. A pipeline failure means that a detection could not become a trusted
+synchronized 3D observation; it does not necessarily mean the image detection was
+semantically wrong.
+
+### Cumulative Success
+
+| Category | Image detections | Confidence pass | Mask-size pass | Projected LiDAR present | Elevated support pass | Final compact 3D success |
+|---|---:|---:|---:|---:|---:|---:|
+| Cargo box | 390 | 325 (83.3%) | 325 (83.3%) | 280 (71.8%) | 90 (23.1%) | 90 (23.1%) |
+| Person | 65 | 18 (27.7%) | 18 (27.7%) | 11 (16.9%) | 3 (4.6%) | 3 (4.6%) |
+| Vehicle | 10 | 8 (80.0%) | 8 (80.0%) | 6 (60.0%) | 6 (60.0%) | 6 (60.0%) |
+| **Total** | **465** | **351 (75.5%)** | **351 (75.5%)** | **297 (63.9%)** | **99 (21.3%)** | **99 (21.3%)** |
+
+The mask-size stage does not remove an additional confidence-passing detection.
+The 32 pathological oversized cargo masks observed in the independent diagnostics
+all already fail the camera-confidence gate. Keeping the explicit mask limit is
+still necessary protection against a future confident oversized mask.
+
+### Mutually Exclusive First Failure
+
+Each detection is counted exactly once at its earliest failing stage:
+
+| Category | Low camera confidence | Oversized mask | No projected LiDAR | Insufficient elevated LiDAR | Noncompact support | Success |
+|---|---:|---:|---:|---:|---:|---:|
+| Cargo box | 65 | 0 | 45 | 190 | 0 | 90 |
+| Person | 47 | 0 | 7 | 8 | 0 | 3 |
+| Vehicle | 2 | 0 | 2 | 0 | 0 | 6 |
+| **Total** | **114** | **0** | **54** | **198** | **0** | **99** |
+
+Thus, 24.5% of all detections fail first at camera confidence, 11.6% have no
+projected LiDAR return after passing image gates, 42.6% lack sufficient elevated
+physical support, and 21.3% become trusted 3D observations.
+
+### Overlapping Diagnostic Failures
+
+The following counts are intentionally non-exclusive and therefore must not be
+summed. They show every failed condition regardless of earlier gates:
+
+| Category | Low confidence | Oversized mask | No projected LiDAR | Insufficient elevated LiDAR | Noncompact support |
+|---|---:|---:|---:|---:|---:|
+| Cargo box | 65 | 32 | 54 | 293 | 5 |
+| Person | 47 | 0 | 28 | 55 | 0 |
+| Vehicle | 2 | 0 | 3 | 3 | 0 |
+
+The person bottleneck is primarily multimodal overlap: 65 image detections reduce
+to 37 with any projected LiDAR, 12 with any height-verified return, and only 3 with
+the required confidence and at least two compact elevated returns. The camera saw
+the person repeatedly, but the synchronized LiDAR evidence was usually absent or
+too sparse for trusted 3D localization.
+
+### Observation-to-Track Outcome
+
+Spatial association of the 99 successful observations gives:
+
+- Cargo: 90 successful observations form 12 provisional spatial tracks. Four reach
+  the three-observation threshold; only three correspond to the validated physical
+  cargo boxes. The fourth has five observations but remains unvalidated and is not
+  included in the reported three-box result.
+- Person: all 3 successful observations form one confirmed track.
+- Vehicle: 6 successful observations form four provisional tracks; one reaches
+  three observations at the car location.
+
+This distinction is essential: passing per-observation gates is necessary but does
+not by itself prove that a resulting track corresponds to a known physical object.
+
 ## Covariance
 
 The empirical horizontal covariance matrices are in square metres:
