@@ -212,6 +212,9 @@ class DynamicOccupancyTests(unittest.TestCase):
         ])
         occupancy.update(cluster, np.zeros(3))
         self.assertEqual(len(occupancy.classified_zones()[1]), 1)
+        for _ in range(20):
+            occupancy.update(np.empty((0, 3)), np.zeros(3))
+        self.assertEqual(len(occupancy.classified_zones()[1]), 1)
 
     def test_dense_low_layer_still_requires_temporal_confirmation(self):
         clustering = {

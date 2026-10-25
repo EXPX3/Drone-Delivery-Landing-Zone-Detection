@@ -11,6 +11,10 @@ static and updated maps; semantic points are an additional RGB layer:
 The white-topped test box uses the appearance-specific prompt `white rectangular
 obstacle`. On a captured missed frame this raised the correct detection from
 0.0146 to 0.3586 without lowering the global 0.05 inference threshold.
+The black test box similarly uses `black rectangular obstacle`, which raised its
+verified missed-frame score above threshold to 0.1056. Semantic safety still
+requires synchronized elevated LiDAR returns; an image detection alone cannot
+reject a candidate.
 
 Prepare the reproducible GPU image and model files once:
 

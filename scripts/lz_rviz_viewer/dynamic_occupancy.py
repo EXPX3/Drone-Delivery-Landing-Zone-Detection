@@ -141,6 +141,7 @@ class DynamicOccupancyMap:
         self.coarse_live_hits: dict[tuple[int, int, int], int] = {}
         self.hazard_observations: dict[tuple[int, int, int], list[int]] = defaultdict(list)
         self.confirmed_hazards: set[tuple[int, int, int]] = set()
+        self.persistent_hazards: set[tuple[int, int, int]] = set()
         self.hazard_last_seen: dict[tuple[int, int, int], int] = {}
         self._hazard_zone_links: dict[
             tuple[int, int, int], list[tuple[int, str]]
@@ -209,6 +210,8 @@ class DynamicOccupancyMap:
             if nearby_confirmed:
                 for neighbor in nearby_confirmed:
                     self.hazard_last_seen[neighbor] = self.scan_index
+                    if key in immediate_keys:
+                        self.persistent_hazards.add(neighbor)
                 continue
             cutoff = self.scan_index - self.confirmation_window_scans + 1
             nearby_scans: set[int] = {self.scan_index}
@@ -237,6 +240,8 @@ class DynamicOccupancyMap:
             if len(nearby_scans) < required_hits:
                 continue
             self.confirmed_hazards.add(key)
+            if key in immediate_keys:
+                self.persistent_hazards.add(key)
             self.hazard_last_seen[key] = self.scan_index
             changed += 1
             grid_key = (int(np.floor(center[0] / self._cell_size)),
@@ -267,7 +272,8 @@ class DynamicOccupancyMap:
         origin = np.asarray(sensor_origin, dtype=np.float64)
         stale = [
             key for key in self.confirmed_hazards
-            if self.scan_index - self.hazard_last_seen.get(key, self.scan_index)
+            if key not in self.persistent_hazards
+            and self.scan_index - self.hazard_last_seen.get(key, self.scan_index)
             >= self.hazard_clear_after_scans
             and np.linalg.norm(
                 (np.asarray(key[:2], dtype=np.float64) + 0.5) * self.resolution
@@ -276,6 +282,7 @@ class DynamicOccupancyMap:
         ]
         for key in stale:
             self.confirmed_hazards.remove(key)
+            self.persistent_hazards.discard(key)
             self.hazard_last_seen.pop(key, None)
             for rank, kind in self._hazard_zone_links.pop(key, []):
                 evidence = self.evidence[rank]

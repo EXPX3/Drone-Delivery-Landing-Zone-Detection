@@ -23,7 +23,7 @@ def canonical_class(prompt: str) -> str:
     name = prompt.lower()
     if "person" in name or "human" in name:
         return "person"
-    if name.strip() == "white rectangular obstacle":
+    if name.strip() in {"white rectangular obstacle", "black rectangular obstacle"}:
         return "cargo_box"
     if "box" in name or "crate" in name or "package" in name:
         return "cargo_box"

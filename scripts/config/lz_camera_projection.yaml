@@ -121,7 +121,7 @@ semantic_segmentation:
   # Open-vocabulary prompts cover objects absent from COCO's fixed taxonomy.
   # Appearance-specific wording raises the observed white-topped box from
   # 0.0146 ("white cargo box") to 0.3586 without lowering the global threshold.
-  prompts: [person, black cargo box, white rectangular obstacle, cardboard package, car]
+  prompts: [person, black rectangular obstacle, white rectangular obstacle, cardboard package, car]
   confidence: 0.05
   image_size: 1280
   device: 0
@@ -140,7 +140,9 @@ semantic_segmentation:
     # Vision selects a region to inspect but cannot block a zone by itself.
     minimum_image_confidence:
       person: 0.70
-      cargo_box: 0.25
+      # The appearance-specific black-box prompt scores 0.1056 on the verified
+      # missed frame. Safety still additionally requires elevated LiDAR points.
+      cargo_box: 0.10
       vehicle: 0.30
     minimum_lidar_points_per_frame: 2
     confirmation_frames: 1
