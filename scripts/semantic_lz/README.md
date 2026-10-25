@@ -71,3 +71,14 @@ downstream consumers.
 Generated weights and experiment images live under
 `pcds/semantic_experiment/` and remain outside Git.
 
+Render the persistent orthophoto summary after a metrics replay:
+
+```bash
+/home/gvb/Documents/robotspace/venvs/praktikum_flightplanning_venv/bin/python \
+  scripts/semantic_lz/render_object_orthophoto.py
+```
+
+The output `pcds/semantic_experiment/confirmed_objects_orthophoto_metrics.png`
+contains confirmed object positions, all pairwise relative offsets and distances,
+observation counts, radial P95, covariance matrices, and 95% XY covariance ellipses.
+
