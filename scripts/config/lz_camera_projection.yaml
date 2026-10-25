@@ -109,7 +109,9 @@ output:
 semantic_segmentation:
   enabled: true
   # Open-vocabulary prompts cover objects absent from COCO's fixed taxonomy.
-  prompts: [person, black cargo box, white cargo box, cardboard package, car]
+  # Appearance-specific wording raises the observed white-topped box from
+  # 0.0146 ("white cargo box") to 0.3586 without lowering the global threshold.
+  prompts: [person, black cargo box, white rectangular obstacle, cardboard package, car]
   confidence: 0.05
   image_size: 1280
   device: 0

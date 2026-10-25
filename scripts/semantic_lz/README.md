@@ -8,6 +8,10 @@ static and updated maps; semantic points are an additional RGB layer:
 - yellow: cargo box/package/crate
 - blue: vehicle
 
+The white-topped test box uses the appearance-specific prompt `white rectangular
+obstacle`. On a captured missed frame this raised the correct detection from
+0.0146 to 0.3586 without lowering the global 0.05 inference threshold.
+
 Prepare the reproducible GPU image and model files once:
 
 ```bash
@@ -44,8 +48,8 @@ LiDAR poses previously caused repeated observations to spread into a halo.
 
 Semantics and safety evidence are separate. Vision only identifies a region for
 focused LiDAR verification. High-confidence vision requires at least two physical
-above-ground LiDAR returns in each of two independent frames before those LiDAR
-voxels may block a candidate. Image confidence alone never enters occupancy, so
+above-ground LiDAR returns in one frame before those LiDAR voxels may block a
+candidate. Image confidence alone never enters occupancy, so
 a paper or painted marking misclassified as a box cannot reject a landing zone.
 The ordinary LiDAR occupancy pipeline remains authoritative everywhere.
 

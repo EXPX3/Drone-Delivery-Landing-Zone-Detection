@@ -16,6 +16,7 @@ class SemanticFusionTests(unittest.TestCase):
     def test_canonical_classes_cover_safety_obstacles(self):
         self.assertEqual(canonical_class("person"), "person")
         self.assertEqual(canonical_class("cardboard box"), "cargo_box")
+        self.assertEqual(canonical_class("white rectangular obstacle"), "cargo_box")
         self.assertEqual(canonical_class("car"), "vehicle")
 
     def test_projected_pixels_receive_mask_label(self):
