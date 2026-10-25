@@ -82,3 +82,14 @@ The output `pcds/semantic_experiment/confirmed_objects_orthophoto_metrics.png`
 contains confirmed object positions, all pairwise relative offsets and distances,
 observation counts, radial P95, covariance matrices, and 95% XY covariance ellipses.
 
+Render the full-bag 2D/3D covariance-evolution video:
+
+```bash
+/home/gvb/Documents/robotspace/venvs/praktikum_flightplanning_venv/bin/python \
+  scripts/semantic_lz/render_covariance_evolution_video.py
+```
+
+The 34.8 s MP4 replays the 346.7 s bag at 10x. Its orthophoto panel remains
+metric; the 3D Gaussian footprints use a labeled 4x horizontal display scale so
+sub-metre covariance changes remain visible against the multi-object scene.
+
