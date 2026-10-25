@@ -151,6 +151,10 @@ point_clustering:
   minimum_points_near: 5
   minimum_points_mid: 4
   minimum_points_far: 3
+  immediate_minimum_points_near: 8
+  immediate_minimum_points_mid: 6
+  immediate_minimum_points_far: 5
+  immediate_minimum_height_m: 0.30
   near_range_m: 10.0
   mid_range_m: 20.0
   far_range_m: 40.0
@@ -160,6 +164,11 @@ validated_pose_replay:
   enabled: true
   maximum_timestamp_error_s: 0.03
 ```
+
+Dense clusters at least 0.30 m above a candidate block it on their first scan.
+Smaller or lower clusters require two observations in a three-scan window. A
+blocked zone is restored only after 15 supporting-return-free scans while it is
+within the 20 m clearing radius.
 
 This bag demonstration replays the final globally corrected trajectory and therefore
 reproduces the validated experiment exactly. A physical live sensor can use the same

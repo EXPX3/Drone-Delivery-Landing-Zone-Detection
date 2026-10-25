@@ -189,6 +189,54 @@ class DynamicOccupancyTests(unittest.TestCase):
         occupancy.update(np.array([[1.0, 0.0, 10.5], [1.8, 0.0, 10.5]]), np.zeros(3))
         self.assertEqual(len(occupancy.classified_zones()[1]), 0)
 
+    def test_dense_elevated_cluster_blocks_on_first_scan(self):
+        clustering = {
+            "enabled": True, "radius_m": 0.25,
+            "minimum_points_near": 5, "minimum_points_mid": 4,
+            "minimum_points_far": 3, "near_range_m": 10.0,
+            "mid_range_m": 20.0, "far_range_m": 40.0,
+            "immediate_minimum_points_near": 8,
+            "immediate_minimum_points_mid": 6,
+            "immediate_minimum_points_far": 5,
+            "immediate_minimum_height_m": 0.30,
+            "beyond_far_confirmation_hits": 3,
+        }
+        occupancy = DynamicOccupancyMap(
+            np.empty((0, 3)), [zone()], resolution=0.2,
+            obstacle_min_height_m=0.2, min_obstacle_voxels=2,
+            clustering=clustering,
+        )
+        cluster = np.array([
+            [1.00 + 0.02 * index, 0.01 * (index % 2), 10.55]
+            for index in range(8)
+        ])
+        occupancy.update(cluster, np.zeros(3))
+        self.assertEqual(len(occupancy.classified_zones()[1]), 1)
+
+    def test_dense_low_layer_still_requires_temporal_confirmation(self):
+        clustering = {
+            "enabled": True, "radius_m": 0.25,
+            "minimum_points_near": 5, "minimum_points_mid": 4,
+            "minimum_points_far": 3, "near_range_m": 10.0,
+            "mid_range_m": 20.0, "far_range_m": 40.0,
+            "immediate_minimum_points_near": 8,
+            "immediate_minimum_points_mid": 6,
+            "immediate_minimum_points_far": 5,
+            "immediate_minimum_height_m": 0.30,
+            "beyond_far_confirmation_hits": 3,
+        }
+        occupancy = DynamicOccupancyMap(
+            np.empty((0, 3)), [zone()], resolution=0.2,
+            obstacle_min_height_m=0.2, min_obstacle_voxels=2,
+            clustering=clustering,
+        )
+        layer = np.array([
+            [1.00 + 0.02 * index, 0.01 * (index % 2), 10.22]
+            for index in range(8)
+        ])
+        occupancy.update(layer, np.zeros(3))
+        self.assertEqual(len(occupancy.classified_zones()[1]), 0)
+
     def test_temporal_confirmation_tolerates_neighbor_voxel_jitter(self):
         occupancy = DynamicOccupancyMap(
             np.empty((0, 3)), [zone()], resolution=0.2, coarse_resolution=1.0,

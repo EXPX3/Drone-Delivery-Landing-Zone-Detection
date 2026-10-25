@@ -178,11 +178,17 @@ class DynamicOccupancyMap:
         interest = self._interest_mask(points)
         keys = unique_rows(voxel_keys(points[interest], self.resolution))
         hazard_interest = self._interest_mask(hazard_source)
-        hazard_points = self._clustered_hazard_points(hazard_source[hazard_interest], sensor_origin)
+        hazard_points, immediate_points = self._clustered_hazard_points(
+            hazard_source[hazard_interest], sensor_origin,
+        )
         hazard_positions: dict[tuple[int, int, int], list[np.ndarray]] = defaultdict(list)
         for point, row in zip(hazard_points, voxel_keys(hazard_points, self.resolution)):
             hazard_positions[tuple(int(value) for value in row)].append(point)
         hazard_keys = set(hazard_positions)
+        immediate_keys = {
+            tuple(int(value) for value in row)
+            for row in voxel_keys(immediate_points, self.resolution)
+        }
         coarse_keys = unique_rows(voxel_keys(points[~interest], self.coarse_resolution))
         for row in coarse_keys:
             key = tuple(int(v) for v in row)
@@ -221,9 +227,12 @@ class DynamicOccupancyMap:
                 observations.pop(0)
             center = np.mean(hazard_positions[key], axis=0)
             required_hits = self.min_obstacle_voxels
+            if key in immediate_keys:
+                required_hits = 1
             if sensor_origin is not None:
                 distance_to_sensor = float(np.linalg.norm(center[:2] - np.asarray(sensor_origin)[:2]))
-                if distance_to_sensor > float(self.clustering.get("far_range_m", np.inf)):
+                if (key not in immediate_keys
+                        and distance_to_sensor > float(self.clustering.get("far_range_m", np.inf))):
                     required_hits = int(self.clustering.get("beyond_far_confirmation_hits", required_hits))
             if len(nearby_scans) < required_hits:
                 continue
@@ -277,9 +286,9 @@ class DynamicOccupancyMap:
         return len(stale)
 
     def _clustered_hazard_points(self, points: np.ndarray,
-                                 sensor_origin: np.ndarray | None) -> np.ndarray:
+                                 sensor_origin: np.ndarray | None) -> tuple[np.ndarray, np.ndarray]:
         if not len(points):
-            return points
+            return points, points
         distance, zone_index = self._zone_tree.query(points[:, :2], k=1)
         zone_z = np.asarray([float(self.zones[index]["z"]) for index in zone_index])
         reach = np.asarray([
@@ -292,7 +301,7 @@ class DynamicOccupancyMap:
         )
         hazards = points[keep]
         if not self.clustering.get("enabled", False) or len(hazards) == 0:
-            return hazards
+            return hazards, np.empty((0, 3), dtype=np.float64)
 
         radius = float(self.clustering["radius_m"])
         tree = cKDTree(hazards)
@@ -312,6 +321,7 @@ class DynamicOccupancyMap:
         labels = np.asarray([find(index) for index in range(len(hazards))])
         unique, counts = np.unique(labels, return_counts=True)
         accepted: list[np.ndarray] = []
+        immediate: list[np.ndarray] = []
         for label, count in zip(unique, counts):
             cluster = hazards[labels == label]
             if sensor_origin is None:
@@ -322,13 +332,31 @@ class DynamicOccupancyMap:
                 ))
             if horizontal_range <= float(self.clustering["near_range_m"]):
                 minimum = int(self.clustering["minimum_points_near"])
+                immediate_minimum = int(
+                    self.clustering.get("immediate_minimum_points_near", 2 * minimum)
+                )
             elif horizontal_range <= float(self.clustering["mid_range_m"]):
                 minimum = int(self.clustering["minimum_points_mid"])
+                immediate_minimum = int(
+                    self.clustering.get("immediate_minimum_points_mid", 2 * minimum)
+                )
             else:
                 minimum = int(self.clustering["minimum_points_far"])
+                immediate_minimum = int(
+                    self.clustering.get("immediate_minimum_points_far", 2 * minimum)
+                )
             if count >= minimum:
                 accepted.append(cluster)
-        return np.vstack(accepted) if accepted else np.empty((0, 3), dtype=np.float64)
+                _, nearest_zone = self._zone_tree.query(np.median(cluster[:, :2], axis=0), k=1)
+                maximum_height = float(np.max(cluster[:, 2]) - float(self.zones[int(nearest_zone)]["z"]))
+                if (count >= immediate_minimum
+                        and maximum_height >= float(
+                            self.clustering.get("immediate_minimum_height_m", 0.30)
+                        )):
+                    immediate.append(cluster)
+        empty = np.empty((0, 3), dtype=np.float64)
+        return (np.vstack(accepted) if accepted else empty,
+                np.vstack(immediate) if immediate else empty)
 
     def occupancy_layers(self, include_baseline: bool = True,
                          confirmed_only: bool = True,
