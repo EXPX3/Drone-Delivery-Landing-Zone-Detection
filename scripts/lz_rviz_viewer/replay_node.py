@@ -409,6 +409,16 @@ class LandingZoneRvizReplay(Node):
             center = np.median(centers, axis=0)
             color_rgb = self.guided_lidar_tracker.track_color(track) / 255.0
             rgb = (float(color_rgb[0]), float(color_rgb[1]), float(color_rgb[2]))
+            centroid_marker = marker(
+                10000 + 10 * track.track_id, "semantic_track_centroids",
+                Marker.SPHERE, (*rgb, 1.0), 0.48, timestamp_ns,
+            )
+            centroid_local = center - self.origin
+            centroid_marker.pose.position = Point(
+                x=float(centroid_local[0]), y=float(centroid_local[1]),
+                z=float(centroid_local[2] + 0.25),
+            )
+            semantic_markers.append(centroid_marker)
             angles = np.linspace(0.0, 2.0 * np.pi, 49)
             sigma_axes = np.maximum(np.sqrt(np.maximum(eigenvalues, 0.0)), 0.05)
             local = center - self.origin
@@ -814,7 +824,17 @@ class LandingZoneRvizReplay(Node):
                         verification.get("maximum_mask_fraction", {}),
                     ))
                 semantic_points, semantic_colors = self.guided_lidar_tracker.point_cloud()
-                confirmed_lidar_points = semantic_points
+                safety_age = int(semantic.get("vision_guided_lidar", {}).get(
+                    "safety_maximum_age_frames", 90,
+                ))
+                recent_tracks = [
+                    track for track in self.guided_lidar_tracker.confirmed_tracks()
+                    if frame_number + 1 - track.last_frame <= safety_age
+                ]
+                confirmed_lidar_points = (
+                    np.vstack([track.points for track in recent_tracks])
+                    if recent_tracks else np.empty((0, 3), dtype=np.float64)
+                )
                 semantic_zone_changes = self.occupancy.add_confirmed_lidar_obstacles(
                     confirmed_lidar_points,
                 )

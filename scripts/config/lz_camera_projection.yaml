@@ -156,9 +156,12 @@ semantic_segmentation:
       cargo_box: 0.75
       vehicle: 3.50
     minimum_lidar_points_per_frame: 2
-    confirmation_frames: 1
+    # Require independent temporal support, then retain the confirmed object in
+    # RViz for cross-pass comparison. Safety refresh remains separately bounded.
+    confirmation_frames: 3
     cluster_radius_m: 0.75
     association_radius_m: 0.90
-    maximum_age_frames: 90
+    maximum_age_frames: 0
+    safety_maximum_age_frames: 90
     history_size: 60
 

@@ -121,7 +121,7 @@ Visualization Manager:
       Position Transformer: XYZ
       Selectable: true
       Size (Pixels): 8
-      Size (m): 0.22
+      Size (m): 0.32
       Style: Spheres
       Topic:
         Depth: 1

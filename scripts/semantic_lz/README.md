@@ -44,8 +44,10 @@ class-specific low-confidence detections. Same-class instances receive distinct
 track IDs and labels with the full empirical XY covariance matrix and radial P95.
 RViz draws oriented 1/2/3-sigma contours plus a normalized Gaussian wireframe;
 the wireframe height represents relative likelihood, not physical altitude. Tracks retain
-only current physical support and a bounded observation history, then expire after
-90 processed frames without support.
+only current physical support and a bounded observation history. Once confirmed by
+three frames they remain visible for cross-pass comparison. Only support observed
+within the latest 90 displayed frames refreshes landing-zone hazards, so persistent
+visualization does not make a stale position permanently unsafe.
 
 The former display colored every return inside a mask. A full-bag audit found masks
 covering 65.3% of the image and painting 4,122 returns with 7.57 m radial spread;
