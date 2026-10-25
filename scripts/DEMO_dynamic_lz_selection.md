@@ -35,7 +35,7 @@ Two octree-style depths reduce update and rendering cost:
 - Above-ground points are clustered within `0.25 m`; isolated returns are rejected.
 - Five points are required below 10 m range, four below 20 m, and three beyond it.
 - A hazard must occur in two of three scans; points beyond 40 m require three hits.
-- Point stride three, batched voxel uniqueness, spatial candidate indexing, 5 Hz live-delta
+- Full safety points, map stride three, batched voxel uniqueness, spatial candidate indexing, 5 Hz live-delta
   publication and 5 Hz zone publication bound processing while keeping visible
   candidate-state latency below approximately 0.3 s.
 
@@ -134,7 +134,7 @@ interest_padding_m: 1.0
 confirmation_hits: 2
 confirmation_window_scans: 3
 maximum_lidar_range_m: 80.0       # complete live-map integration
-rolling_horizontal_radius_m: 25.0 # landing-zone processing only
+rolling_horizontal_radius_m: 10.0 # landing-zone processing only
 point_stride: 1                   # full safety/semantic input
 map_point_stride: 3               # visualization/map fusion only
 publish_hz: 5.0
@@ -168,9 +168,9 @@ validated_pose_replay:
 Dense clusters at least 0.30 m above a candidate block it on their first scan.
 Smaller or lower clusters require two observations in a three-scan window. Either
 geometry-only state may recover after 15 nearby clear scans, preventing systematic
-ground-layer noise from freezing large areas. An obstacle becomes persistent only
-when image semantics and elevated LiDAR returns agree; image evidence alone never
-blocks a candidate.
+ground-layer noise from freezing large areas. Image semantics can refresh a hazard
+only when elevated LiDAR returns agree; it does not make stale evidence permanent,
+and image evidence alone never blocks a candidate.
 
 This bag demonstration replays the final globally corrected trajectory and therefore
 reproduces the validated experiment exactly. A physical live sensor can use the same
@@ -184,7 +184,7 @@ and final global refinement remain delayed until a repeated area is observed.
   -m unittest discover -s scripts/tests -v
 ```
 
-Expected result: 26 tests pass.
+Expected result: 37 tests pass.
 
 ## Synchronization Evidence
 

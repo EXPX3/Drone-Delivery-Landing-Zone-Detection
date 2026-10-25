@@ -36,7 +36,9 @@ dynamic_occupancy:
   hazard_clear_after_scans: 15
   hazard_clearing_radius_m: 20.0
   maximum_lidar_range_m: 80.0
-  rolling_horizontal_radius_m: 25.0
+  # Safety revalidation is local below the UAV; the full map is still fused and
+  # displayed independently.
+  rolling_horizontal_radius_m: 10.0
   # Preserve every return for obstacle and semantic processing. Only the
   # evolving visualization/map fusion stream is downsampled for efficiency.
   point_stride: 1
@@ -127,25 +129,36 @@ semantic_segmentation:
   device: 0
   inference_stride: 3
   maximum_lidar_age_s: 0.15
-  # Object-level fusion tolerates neighboring-return jitter while retaining only
-  # the latest compact support instead of a trail of historical points.
-  object_tracking:
-    cluster_radius_m: 0.75
-    association_radius_m: 1.20
-    confirmation_frames: 3
   # Reject terrain returns that project through an object mask.
   minimum_height_above_ground_m: 0.20
   maximum_height_above_ground_m: 5.0
   vision_guided_lidar:
     # Vision selects a region to inspect but cannot block a zone by itself.
     minimum_image_confidence:
-      person: 0.70
+      # Open-vocabulary scores are not calibrated probabilities. These gates
+      # are paired with elevated compact 3D support below.
+      person: 0.30
       # The appearance-specific black-box prompt scores 0.1056 on the verified
       # missed frame. Safety still additionally requires elevated LiDAR points.
       cargo_box: 0.10
-      vehicle: 0.30
+      vehicle: 0.08
+    # Reject pathological masks such as the observed 65.3%-of-image cargo mask.
+    maximum_mask_fraction:
+      person: 0.05
+      cargo_box: 0.08
+      vehicle: 0.15
+    minimum_lidar_points_by_class:
+      person: 2
+      cargo_box: 2
+      vehicle: 5
+    maximum_radial_p95_m:
+      person: 0.80
+      cargo_box: 0.75
+      vehicle: 3.50
     minimum_lidar_points_per_frame: 2
     confirmation_frames: 1
     cluster_radius_m: 0.75
-    association_radius_m: 1.20
+    association_radius_m: 0.90
+    maximum_age_frames: 90
+    history_size: 60
 

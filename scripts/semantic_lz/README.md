@@ -2,7 +2,8 @@
 
 This branch adds synchronized open-vocabulary image segmentation and transfers
 the image masks onto the corrected LiDAR scan. RViz keeps showing the complete
-static and updated maps; semantic points are an additional RGB layer:
+static and updated maps; compact physically verified semantic tracks are an
+additional RGB layer:
 
 - magenta: person
 - yellow: cargo box/package/crate
@@ -37,16 +38,20 @@ the geometry-based safety rejection remain independent: an unrecognized obstacle
 can still invalidate a landing zone. The semantic layer is therefore descriptive
 evidence, not a replacement for geometric collision checking.
 
-The semantic RViz layer renders classified LiDAR returns as 0.22 m spheres.
-Returns within 0.75 m are grouped into an object observation and associated with
-same-class tracks within 1.20 m. Tracks require three observed frames and retain
-only their latest compact point support plus a smoothed centroid, avoiding a
-historical trail while tolerating adjacent-voxel projection jitter.
+The semantic RViz layer renders only compact connected LiDAR components 0.20-5.0 m
+above the Bayern terrain model. It rejects oversized masks, broad components, and
+class-specific low-confidence detections. Same-class instances receive distinct
+track colors and labels with empirical horizontal SD and radial P95. Tracks retain
+only current physical support and a bounded observation history, then expire after
+90 processed frames without support.
 
-Object tracks require three independent frame observations before display. The
-colored layer follows PointPainting and retains synchronized LiDAR returns inside
-the image mask; those colors are semantic evidence, not geometric safety proof.
-Safety accepts only returns 0.20-5.0 m above the Bayern terrain model. Camera projection uses the same strip-optimized
+The former display colored every return inside a mask. A full-bag audit found masks
+covering 65.3% of the image and painting 4,122 returns with 7.57 m radial spread;
+those were ground scan lines, not box geometry. The corrected three box tracks have
+0.42-0.45 m radial P95 across traverses. See
+`scripts/SEMANTIC_OBJECT_LOCALIZATION_UNCERTAINTY_STUDY.md`.
+
+Camera projection uses the same strip-optimized
 body trajectory as the deskewed LiDAR map; mixing raw camera poses with optimized
 LiDAR poses previously caused repeated observations to spread into a halo.
 
@@ -55,7 +60,9 @@ focused LiDAR verification. High-confidence vision requires at least two physica
 above-ground LiDAR returns in one frame before those LiDAR voxels may block a
 candidate. Image confidence alone never enters occupancy, so
 a paper or painted marking misclassified as a box cannot reject a landing zone.
-The ordinary LiDAR occupancy pipeline remains authoritative everywhere.
+The ordinary LiDAR occupancy pipeline remains authoritative everywhere. Current
+track state is also published as JSON on `/ddlzd/semantic_object_uncertainty` for
+downstream consumers.
 
 Generated weights and experiment images live under
 `pcds/semantic_experiment/` and remain outside Git.

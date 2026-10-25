@@ -418,12 +418,11 @@ class DynamicOccupancyMap:
         return active, blocked
 
     def add_confirmed_lidar_obstacles(self, points: np.ndarray) -> int:
-        """Persist obstacles confirmed jointly by semantics and physical LiDAR."""
+        """Refresh obstacles confirmed jointly by semantics and physical LiDAR."""
         changed = 0
         for point in np.asarray(points, dtype=np.float64):
             key = tuple(int(value) for value in np.floor(point / self.resolution))
             self.confirmed_hazards.add(key)
-            self.persistent_hazards.add(key)
             self.hazard_last_seen[key] = self.scan_index
             grid_key = (int(np.floor(point[0] / self._cell_size)),
                         int(np.floor(point[1] / self._cell_size)))

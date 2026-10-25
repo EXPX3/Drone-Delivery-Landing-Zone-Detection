@@ -20,7 +20,7 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image, PointCloud2, PointField
-from std_msgs.msg import ColorRGBA, Header
+from std_msgs.msg import ColorRGBA, Header, String
 from visualization_msgs.msg import Marker, MarkerArray
 
 SCRIPTS = Path(__file__).resolve().parents[1]
@@ -43,7 +43,8 @@ from project_lz_into_bag_camera import (  # noqa: E402
     open_reader, read_pose_and_gps, require_ros, stamp_ns,
 )
 from semantic_lz.semantic_fusion import (  # noqa: E402
-    OpenVocabularySegmenter, SemanticObjectTracker, colorize_frame, labels_at_pixels,
+    OpenVocabularySegmenter, SemanticObjectTracker, colorize_frame,
+    compact_supported_clusters, filter_semantic_result, labels_at_pixels,
 )
 
 FRAME_ID = "lz_world"
@@ -148,6 +149,24 @@ def append_segments(item: Marker, points: np.ndarray, origin: np.ndarray, close:
                             Point(x=float(second[0]), y=float(second[1]), z=float(second[2]))))
 
 
+def point_distribution(points: np.ndarray) -> dict:
+    """Compact robust statistics for comparing semantic and physical support."""
+    values = np.asarray(points, dtype=np.float64)
+    if not len(values):
+        return {"count": 0}
+    center = np.median(values, axis=0)
+    offsets = values[:, :2] - center[:2]
+    radial = np.linalg.norm(offsets, axis=1)
+    return {
+        "count": int(len(values)),
+        "median_xyz": center.tolist(),
+        "std_xyz": np.std(values, axis=0).tolist(),
+        "radial_p95_m": float(np.percentile(radial, 95)),
+        "xy_min": np.min(values[:, :2], axis=0).tolist(),
+        "xy_max": np.max(values[:, :2], axis=0).tolist(),
+    }
+
+
 class LandingZoneRvizReplay(Node):
     def __init__(self, args: argparse.Namespace) -> None:
         super().__init__("landing_zone_rviz_replay")
@@ -155,7 +174,7 @@ class LandingZoneRvizReplay(Node):
         self.metrics = {
             "detections": Counter(), "projected_points": Counter(),
             "above_ground_points": Counter(), "guided_points": Counter(),
-            "height_residuals_m": {},
+            "height_residuals_m": {}, "semantic_observations": [],
         }
         self.stop = threading.Event()
         with args.config.open(encoding="utf-8") as handle:
@@ -232,6 +251,9 @@ class LandingZoneRvizReplay(Node):
         self.semantic_pub = self.create_publisher(
             PointCloud2, "/ddlzd/semantic_obstacles", durable,
         )
+        self.semantic_tracks_pub = self.create_publisher(
+            String, "/ddlzd/semantic_object_uncertainty", live,
+        )
         semantic = self.config.get("semantic_segmentation", {})
         self.segmenter = None
         if bool(semantic.get("enabled", False)):
@@ -240,17 +262,13 @@ class LandingZoneRvizReplay(Node):
                 confidence=float(semantic["confidence"]),
                 image_size=int(semantic["image_size"]), device=str(semantic["device"]),
             )
-        tracking = semantic.get("object_tracking", {})
-        self.semantic_tracker = SemanticObjectTracker(
-            cluster_radius_m=float(tracking.get("cluster_radius_m", 0.75)),
-            association_radius_m=float(tracking.get("association_radius_m", 1.2)),
-            confirmation_frames=int(tracking.get("confirmation_frames", 3)),
-        )
         verification = semantic.get("vision_guided_lidar", {})
         self.guided_lidar_tracker = SemanticObjectTracker(
             cluster_radius_m=float(verification.get("cluster_radius_m", 0.75)),
             association_radius_m=float(verification.get("association_radius_m", 1.2)),
             confirmation_frames=int(verification.get("confirmation_frames", 2)),
+            maximum_age_frames=int(verification.get("maximum_age_frames", 90)),
+            history_size=int(verification.get("history_size", 60)),
         )
         self.cloud_pub.publish(point_cloud_message(cloud, self.origin))
         self.static_pub.publish(self.zone_markers(0))
@@ -380,7 +398,43 @@ class LandingZoneRvizReplay(Node):
         for value in (uav, gnss_uav):
             local = value - self.origin
             registration.points.append(Point(x=float(local[0]), y=float(local[1]), z=float(local[2])))
-        return MarkerArray(markers=[clear, pink, trail, aircraft, outline, rays, label, registration])
+        semantic_markers: list[Marker] = []
+        for track in self.guided_lidar_tracker.confirmed_tracks():
+            centers = np.asarray(track.centers, dtype=np.float64)
+            covariance = (np.cov(centers[:, :2], rowvar=False)
+                          if len(centers) > 1 else np.eye(2) * 0.01)
+            eigenvalues, eigenvectors = np.linalg.eigh(covariance)
+            order = np.argsort(eigenvalues)[::-1]
+            eigenvalues, eigenvectors = eigenvalues[order], eigenvectors[:, order]
+            center = np.median(centers, axis=0)
+            color_rgb = self.guided_lidar_tracker.track_color(track) / 255.0
+            color = (float(color_rgb[0]), float(color_rgb[1]), float(color_rgb[2]), 1.0)
+            ellipse = marker(1000 + 2 * track.track_id, "semantic_uncertainty",
+                             Marker.LINE_STRIP, color, 0.10, timestamp_ns)
+            angles = np.linspace(0.0, 2.0 * np.pi, 49)
+            # Two empirical standard deviations, with a 0.10 m visibility floor.
+            axes = np.maximum(2.0 * np.sqrt(np.maximum(eigenvalues, 0.0)), 0.10)
+            offsets = (eigenvectors @ np.vstack((axes[0] * np.cos(angles),
+                                                  axes[1] * np.sin(angles)))).T
+            for offset in offsets:
+                local = center - self.origin
+                ellipse.points.append(Point(x=float(local[0] + offset[0]),
+                                            y=float(local[1] + offset[1]),
+                                            z=float(local[2] + 0.35)))
+            text_marker = marker(1001 + 2 * track.track_id, "semantic_track_labels",
+                                 Marker.TEXT_VIEW_FACING, color, 0.45, timestamp_ns)
+            local = center - self.origin
+            text_marker.pose.position = Point(x=float(local[0]), y=float(local[1]),
+                                              z=float(local[2] + 0.75))
+            radial = np.linalg.norm(centers[:, :2] - center[:2], axis=1)
+            text_marker.text = (f"{track.class_name} #{track.track_id} | "
+                                f"SD {np.sqrt(max(eigenvalues)):.2f} m | "
+                                f"P95 {np.percentile(radial, 95):.2f} m")
+            semantic_markers.extend((ellipse, text_marker))
+        return MarkerArray(markers=[
+            clear, pink, trail, aircraft, outline, rays, label, registration,
+            *semantic_markers,
+        ])
 
     def publish_image(self, frame: np.ndarray, timestamp_ns: int) -> None:
         if self.args.image_width > 0 and frame.shape[1] != self.args.image_width:
@@ -604,10 +658,7 @@ class LandingZoneRvizReplay(Node):
                     if np.any(selected):
                         semantic_points = latest_lidar_points[selected]
                         names = np.asarray(semantic_result.class_names, dtype=object)[labels[selected] - 1]
-                        # PointPainting-style visualization keeps all synchronized
-                        # returns in the semantic mask. Safety uses only the
-                        # independently height-verified subset below.
-                        self.semantic_tracker.update(semantic_points, names)
+                        selected_detection = labels[selected] - 1
                         minimum_height = float(semantic.get("minimum_height_above_ground_m", 0.12))
                         maximum_height = float(semantic.get("maximum_height_above_ground_m", 3.0))
                         ground = np.asarray([
@@ -627,37 +678,106 @@ class LandingZoneRvizReplay(Node):
                             value is not None and minimum_height <= point[2] - float(value) <= maximum_height
                             for point, value in zip(semantic_points, ground)
                         ])
+                        if self.args.metrics_json is not None:
+                            yaw_deg = None
+                            if corrected_body_pose is not None:
+                                yaw_deg = float(np.degrees(np.arctan2(
+                                    corrected_body_pose[1, 0], corrected_body_pose[0, 0],
+                                )))
+                            for detection_index, (class_name, confidence, mask) in enumerate(zip(
+                                    semantic_result.class_names,
+                                    semantic_result.confidences,
+                                    semantic_result.masks)):
+                                detection_selected = selected_detection == detection_index
+                                painted = semantic_points[detection_selected]
+                                verified = semantic_points[detection_selected & height_ok]
+                                raw_local = np.empty((0, 3), dtype=np.float64)
+                                if len(verified):
+                                    center = np.median(verified[:, :2], axis=0)
+                                    distance = np.linalg.norm(
+                                        latest_lidar_points[:, :2] - center, axis=1,
+                                    )
+                                    local_candidates = latest_lidar_points[distance <= 1.5]
+                                    local_ground = np.asarray([
+                                        self.terrain.height(float(point[0]), float(point[1]))
+                                        for point in local_candidates
+                                    ], dtype=object)
+                                    local_ok = np.asarray([
+                                        value is not None and minimum_height
+                                        <= point[2] - float(value) <= maximum_height
+                                        for point, value in zip(local_candidates, local_ground)
+                                    ])
+                                    raw_local = local_candidates[local_ok]
+                                self.metrics["semantic_observations"].append({
+                                    "timestamp_ns": int(timestamp),
+                                    "relative_time_s": float((timestamp - first_stamp) / 1e9),
+                                    "image_frame": int(frame_number + 1),
+                                    "class_name": str(class_name),
+                                    "confidence": float(confidence),
+                                    "mask_fraction": float(np.count_nonzero(mask) / mask.size),
+                                    "lidar_age_ms": float((timestamp - latest_lidar_stamp) / 1e6),
+                                    "uav_yaw_deg": yaw_deg,
+                                    "painted": point_distribution(painted),
+                                    "height_verified": point_distribution(verified),
+                                    "raw_local_elevated": point_distribution(raw_local),
+                                })
                         semantic_points = semantic_points[height_ok]
                         names = names[height_ok]
                         self.metrics["above_ground_points"].update(map(str, names))
                         verification = semantic.get("vision_guided_lidar", {})
                         thresholds = verification.get("minimum_image_confidence", {})
-                        point_detection = labels[selected][height_ok] - 1
-                        point_confidence = semantic_result.confidences[point_detection]
-                        minimum_confidence = np.asarray([
-                            float(thresholds.get(str(name), 1.0)) for name in names
-                        ])
-                        trusted = point_confidence >= minimum_confidence
-                        minimum_points = int(verification.get("minimum_lidar_points_per_frame", 2))
+                        mask_limits = verification.get("maximum_mask_fraction", {})
+                        radial_limits = verification.get("maximum_radial_p95_m", {})
+                        minimum_by_class = verification.get("minimum_lidar_points_by_class", {})
+                        point_detection = selected_detection[height_ok]
                         guided_points: list[np.ndarray] = []
                         guided_names: list[str] = []
-                        for class_name in set(names[trusted]):
-                            class_points = semantic_points[trusted & (names == class_name)]
-                            if len(class_points) >= minimum_points:
-                                guided_points.extend(class_points)
-                                guided_names.extend([str(class_name)] * len(class_points))
+                        guided_confidences: list[float] = []
+                        for detection_index, (class_name, confidence, mask) in enumerate(zip(
+                                semantic_result.class_names,
+                                semantic_result.confidences,
+                                semantic_result.masks)):
+                            class_name = str(class_name)
+                            if confidence < float(thresholds.get(class_name, 1.0)):
+                                continue
+                            if (np.count_nonzero(mask) / mask.size
+                                    > float(mask_limits.get(class_name, 1.0))):
+                                continue
+                            detection_points = semantic_points[point_detection == detection_index]
+                            clusters = compact_supported_clusters(
+                                detection_points, class_name,
+                                float(verification.get("cluster_radius_m", 0.75)),
+                                int(minimum_by_class.get(
+                                    class_name,
+                                    verification.get("minimum_lidar_points_per_frame", 2),
+                                )),
+                                float(radial_limits.get(class_name, np.inf)),
+                            )
+                            for cluster in clusters:
+                                guided_points.extend(cluster)
+                                guided_names.extend([class_name] * len(cluster))
+                                guided_confidences.extend([float(confidence)] * len(cluster))
                         if guided_points:
                             self.metrics["guided_points"].update(guided_names)
                             self.guided_lidar_tracker.update(
                                 np.asarray(guided_points), np.asarray(guided_names, dtype=object),
+                                frame_index=frame_number + 1,
+                                confidences=np.asarray(guided_confidences),
                             )
+                        else:
+                            self.guided_lidar_tracker.expire(frame_number + 1)
                         semantic_counts = {
                             name: int(np.count_nonzero(names == name)) for name in set(names)
                         }
                 if semantic_result is not None:
-                    frame = colorize_frame(frame, semantic_result)
-                semantic_points, semantic_colors = self.semantic_tracker.point_cloud()
-                confirmed_lidar_points, _ = self.guided_lidar_tracker.point_cloud()
+                    verification = semantic.get("vision_guided_lidar", {})
+                    frame = colorize_frame(frame, filter_semantic_result(
+                        semantic_result,
+                        verification.get("minimum_image_confidence", {}),
+                        verification.get("maximum_mask_fraction", {}),
+                    ))
+                semantic_points, semantic_colors = self.guided_lidar_tracker.point_cloud()
+                confirmed_lidar_points = semantic_points
                 semantic_zone_changes = self.occupancy.add_confirmed_lidar_obstacles(
                     confirmed_lidar_points,
                 )
@@ -670,6 +790,11 @@ class LandingZoneRvizReplay(Node):
                 )
                 ros_stamp(semantic_cloud, timestamp)
                 self.semantic_pub.publish(semantic_cloud)
+                self.semantic_tracks_pub.publish(String(data=json.dumps({
+                    "timestamp_ns": int(timestamp),
+                    "frame": int(frame_number + 1),
+                    "tracks": self.guided_lidar_tracker.summaries(),
+                })))
                 map_to_base = chain_transform(
                     tf_data, [self.config["frames"]["map"], self.config["frames"]["base"]], timestamp,
                     float(self.config["synchronization"]["max_tf_gap_s"]),
@@ -734,7 +859,6 @@ class LandingZoneRvizReplay(Node):
                     else:
                         report[key] = value
                 report.update({
-                    "semantic_tracks": self.semantic_tracker.summaries(),
                     "guided_lidar_tracks": self.guided_lidar_tracker.summaries(),
                     "active_landing_zones": len(self.active_zones),
                     "blocked_landing_zones": len(self.blocked_zones),

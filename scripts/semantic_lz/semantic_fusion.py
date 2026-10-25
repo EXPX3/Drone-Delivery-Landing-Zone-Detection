@@ -95,17 +95,27 @@ class SemanticObjectTrack:
     centroid: np.ndarray
     points: np.ndarray
     observations: int = 1
+    last_frame: int = 0
+    confidence: float = 0.0
+    centers: list[np.ndarray] | None = None
+
+    def __post_init__(self) -> None:
+        if self.centers is None:
+            self.centers = [self.centroid.copy()]
 
 
 class SemanticObjectTracker:
     """Fuse sparse same-class 3D clusters into compact object tracks."""
 
     def __init__(self, cluster_radius_m: float = 0.75, association_radius_m: float = 1.2,
-                 confirmation_frames: int = 3, smoothing: float = 0.35) -> None:
+                 confirmation_frames: int = 3, smoothing: float = 0.35,
+                 maximum_age_frames: int = 90, history_size: int = 60) -> None:
         self.cluster_radius_m = float(cluster_radius_m)
         self.association_radius_m = float(association_radius_m)
         self.confirmation_frames = int(confirmation_frames)
         self.smoothing = float(smoothing)
+        self.maximum_age_frames = int(maximum_age_frames)
+        self.history_size = int(history_size)
         self.tracks: list[SemanticObjectTrack] = []
         self._next_id = 1
 
@@ -130,14 +140,21 @@ class SemanticObjectTracker:
                 output.append((str(class_name), class_points[sorted(component)]))
         return output
 
-    def update(self, points: np.ndarray, names: np.ndarray) -> None:
+    def update(self, points: np.ndarray, names: np.ndarray, frame_index: int = 0,
+               confidences: np.ndarray | None = None) -> None:
         points = np.asarray(points, dtype=np.float64)
         names = np.asarray(names, dtype=object)
         if not len(points):
+            self.expire(frame_index)
             return
+        if confidences is None:
+            confidences = np.ones(len(points), dtype=np.float64)
+        else:
+            confidences = np.asarray(confidences, dtype=np.float64)
         used_tracks: set[int] = set()
         for class_name, cluster in self._clusters(points, names):
             center = np.median(cluster, axis=0)
+            cluster_confidence = float(np.max(confidences[names == class_name]))
             candidates = [
                 (float(np.linalg.norm(track.centroid - center)), index)
                 for index, track in enumerate(self.tracks)
@@ -149,38 +166,91 @@ class SemanticObjectTracker:
                 track.centroid = (1.0 - self.smoothing) * track.centroid + self.smoothing * center
                 track.points = cluster.copy()
                 track.observations += 1
+                track.last_frame = int(frame_index)
+                track.confidence = max(track.confidence, cluster_confidence)
+                track.centers.append(center.copy())
+                track.centers = track.centers[-self.history_size:]
                 used_tracks.add(index)
             else:
                 self.tracks.append(SemanticObjectTrack(
                     self._next_id, class_name, center.copy(), cluster.copy(),
+                    last_frame=int(frame_index), confidence=cluster_confidence,
                 ))
                 used_tracks.add(len(self.tracks) - 1)
                 self._next_id += 1
+        self.expire(frame_index)
+
+    def expire(self, frame_index: int) -> None:
+        if frame_index <= 0 or self.maximum_age_frames <= 0:
+            return
+        self.tracks = [
+            track for track in self.tracks
+            if frame_index - track.last_frame <= self.maximum_age_frames
+        ]
+
+    @staticmethod
+    def track_color(track: SemanticObjectTrack) -> np.ndarray:
+        base = np.asarray(CLASS_COLORS_RGB[track.class_name], dtype=np.float64)
+        factors = (1.0, 0.72, 0.52, 0.86, 0.62)
+        factor = factors[(track.track_id - 1) % len(factors)]
+        # Retain the semantic hue while making same-class instances distinguishable.
+        return np.clip(base * factor + (255.0 - base) * (1.0 - factor) * 0.25,
+                       0, 255).astype(np.uint8)
+
+    def confirmed_tracks(self) -> list[SemanticObjectTrack]:
+        return [track for track in self.tracks
+                if track.observations >= self.confirmation_frames]
 
     def point_cloud(self) -> tuple[np.ndarray, np.ndarray]:
-        confirmed = [track for track in self.tracks
-                     if track.observations >= self.confirmation_frames]
+        confirmed = self.confirmed_tracks()
         if not confirmed:
             return np.empty((0, 3), dtype=np.float64), np.empty((0, 3), dtype=np.uint8)
         clouds, colors = [], []
         for track in confirmed:
             points = np.vstack((track.points, track.centroid[None, :]))
             clouds.append(points)
-            colors.append(np.tile(CLASS_COLORS_RGB[track.class_name], (len(points), 1)))
+            colors.append(np.tile(self.track_color(track), (len(points), 1)))
         return np.vstack(clouds), np.vstack(colors).astype(np.uint8)
 
     def summaries(self) -> list[dict]:
-        return [
-            {
+        output = []
+        for track in self.tracks:
+            centers = np.asarray(track.centers, dtype=np.float64)
+            center = np.median(centers, axis=0)
+            radial = np.linalg.norm(centers[:, :2] - center[:2], axis=1)
+            output.append({
                 "track_id": track.track_id,
                 "class_name": track.class_name,
                 "observations": track.observations,
                 "confirmed": track.observations >= self.confirmation_frames,
                 "centroid": track.centroid.tolist(),
                 "latest_point_count": len(track.points),
-            }
-            for track in self.tracks
-        ]
+                "last_frame": track.last_frame,
+                "confidence": track.confidence,
+                "empirical_std_xyz_m": np.std(centers, axis=0).tolist(),
+                "empirical_radial_p95_m": float(np.percentile(radial, 95)),
+            })
+        return output
+
+
+def compact_supported_clusters(points: np.ndarray, class_name: str,
+                               cluster_radius_m: float, minimum_points: int,
+                               maximum_radial_p95_m: float) -> list[np.ndarray]:
+    """Return physically compact connected components from one image detection."""
+    values = np.asarray(points, dtype=np.float64)
+    if not len(values):
+        return []
+    tracker = SemanticObjectTracker(cluster_radius_m=cluster_radius_m)
+    names = np.full(len(values), class_name, dtype=object)
+    accepted = []
+    for _, cluster in tracker._clusters(values, names):
+        if len(cluster) < minimum_points:
+            continue
+        center = np.median(cluster[:, :2], axis=0)
+        radial = np.linalg.norm(cluster[:, :2] - center, axis=1)
+        if float(np.percentile(radial, 95)) <= maximum_radial_p95_m:
+            accepted.append(cluster)
+    return accepted
 
 
 class OpenVocabularySegmenter:
@@ -244,6 +314,21 @@ def colorize_frame(frame: np.ndarray, result: SemanticResult, alpha: float = 0.4
             cv2.putText(output, f"{name} {score:.2f}", (x, max(24, y - 6)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.62, color, 2, cv2.LINE_AA)
     return cv2.addWeighted(overlay, alpha, output, 1.0 - alpha, 0.0)
+
+
+def filter_semantic_result(result: SemanticResult, minimum_confidence: dict,
+                           maximum_mask_fraction: dict) -> SemanticResult:
+    """Keep only image detections eligible for physical 3D verification."""
+    keep = np.asarray([
+        score >= float(minimum_confidence.get(name, 1.0))
+        and np.count_nonzero(mask) / mask.size
+        <= float(maximum_mask_fraction.get(name, 1.0))
+        for name, score, mask in zip(result.class_names, result.confidences, result.masks)
+    ], dtype=bool)
+    return SemanticResult(
+        [name for name, selected in zip(result.class_names, keep) if selected],
+        result.confidences[keep], result.masks[keep],
+    )
 
 
 def labels_at_pixels(result: SemanticResult, pixels: np.ndarray, valid: np.ndarray) -> np.ndarray:

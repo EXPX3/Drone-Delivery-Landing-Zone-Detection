@@ -8,7 +8,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 from semantic_lz.semantic_fusion import (
     SemanticObjectTracker, SemanticResult, SemanticVoxelMemory,
-    canonical_class, labels_at_pixels,
+    canonical_class, compact_supported_clusters, filter_semantic_result,
+    labels_at_pixels,
 )
 
 
@@ -27,6 +28,20 @@ class SemanticFusionTests(unittest.TestCase):
         pixels = np.array([[3.0, 4.0], [7.0, 7.0], [3.0, 4.0]])
         valid = np.array([True, True, False])
         self.assertEqual(labels_at_pixels(result, pixels, valid).tolist(), [1, 0, 0])
+
+    def test_image_filter_rejects_low_confidence_and_oversized_masks(self):
+        masks = np.zeros((3, 10, 10), dtype=bool)
+        masks[0, :2, :2] = True
+        masks[1, :2, :2] = True
+        masks[2, :, :] = True
+        result = SemanticResult(
+            ["cargo_box", "cargo_box", "cargo_box"],
+            np.array([0.8, 0.05, 0.8]), masks,
+        )
+        filtered = filter_semantic_result(
+            result, {"cargo_box": 0.1}, {"cargo_box": 0.08},
+        )
+        self.assertEqual(filtered.class_names, ["cargo_box"])
 
     def test_semantic_memory_requires_confirmed_contradiction(self):
         memory = SemanticVoxelMemory(resolution_m=0.2, contradiction_hits=2, confirmation_hits=2)
@@ -68,6 +83,27 @@ class SemanticFusionTests(unittest.TestCase):
         self.assertEqual(len(points), 3)
         self.assertTrue(np.all(points[:2, 0] >= 0.45))
         self.assertEqual(colors[0].tolist(), [255, 255, 0])
+
+    def test_compact_support_rejects_broad_mask_leakage(self):
+        compact = np.array([[0.0, 0.0, 0.5], [0.1, 0.0, 0.6], [0.2, 0.0, 0.5]])
+        broad = np.array([[2.0 + index * 0.4, 0.0, 0.5] for index in range(8)])
+        accepted = compact_supported_clusters(
+            np.vstack((compact, broad)), "cargo_box", cluster_radius_m=0.5,
+            minimum_points=2, maximum_radial_p95_m=0.4,
+        )
+        self.assertEqual(len(accepted), 1)
+        self.assertEqual(len(accepted[0]), 3)
+
+    def test_tracker_expires_stale_object_and_assigns_instance_colors(self):
+        tracker = SemanticObjectTracker(
+            confirmation_frames=1, maximum_age_frames=2, association_radius_m=0.5,
+        )
+        tracker.update(np.array([[0.0, 0.0, 0.5]]), np.array(["cargo_box"]), frame_index=1)
+        tracker.update(np.array([[2.0, 0.0, 0.5]]), np.array(["cargo_box"]), frame_index=2)
+        _, colors = tracker.point_cloud()
+        self.assertFalse(np.array_equal(colors[0], colors[-1]))
+        tracker.expire(4)
+        self.assertEqual([track.track_id for track in tracker.tracks], [2])
 
 
 if __name__ == "__main__":
