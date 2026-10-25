@@ -240,6 +240,31 @@ class DynamicOccupancyTests(unittest.TestCase):
         )
         self.assertEqual(len(occupancy.classified_zones()[1]), 1)
 
+    def test_nearby_stale_hazard_restores_candidate(self):
+        occupancy = DynamicOccupancyMap(
+            np.empty((0, 3)), [zone()], resolution=0.2,
+            obstacle_min_height_m=0.2, min_obstacle_voxels=1,
+            hazard_clear_after_scans=3, hazard_clearing_radius_m=10.0,
+        )
+        obstacle = np.array([[1.0, 0.0, 10.5]])
+        occupancy.update(obstacle, np.zeros(3))
+        self.assertEqual(len(occupancy.classified_zones()[1]), 1)
+        for _ in range(3):
+            occupancy.update(np.empty((0, 3)), np.zeros(3))
+        self.assertEqual(len(occupancy.classified_zones()[1]), 0)
+
+    def test_stale_hazard_is_not_cleared_when_sensor_is_far_away(self):
+        occupancy = DynamicOccupancyMap(
+            np.empty((0, 3)), [zone()], resolution=0.2,
+            obstacle_min_height_m=0.2, min_obstacle_voxels=1,
+            hazard_clear_after_scans=2, hazard_clearing_radius_m=5.0,
+        )
+        obstacle = np.array([[1.0, 0.0, 10.5]])
+        occupancy.update(obstacle, np.zeros(3))
+        for _ in range(3):
+            occupancy.update(np.empty((0, 3)), np.array([50.0, 50.0, 0.0]))
+        self.assertEqual(len(occupancy.classified_zones()[1]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -29,8 +29,12 @@ dynamic_occupancy:
   resolution_m: 0.20
   coarse_resolution_m: 1.00
   interest_padding_m: 1.0
-  confirmation_hits: 1
+  confirmation_hits: 2
   confirmation_window_scans: 3
+  # A blocked zone is restored only while close enough to observe it and after
+  # this many consecutive scans without supporting obstacle returns.
+  hazard_clear_after_scans: 15
+  hazard_clearing_radius_m: 20.0
   maximum_lidar_range_m: 80.0
   rolling_horizontal_radius_m: 25.0
   # Preserve every return for obstacle and semantic processing. Only the
@@ -43,7 +47,7 @@ dynamic_occupancy:
   # Reuse the risk model's wind/GNSS margin. Confirmed occupancy inside a zone
   # blocks it; occupancy inside this outer margin downgrades it to risky.
   gps_wind_margin_m: 2.0
-  obstacle_min_height_m: 0.15
+  obstacle_min_height_m: 0.20
   vertical_clearance_m: 5.0
   point_clustering:
     enabled: true
@@ -124,7 +128,7 @@ semantic_segmentation:
     association_radius_m: 1.20
     confirmation_frames: 3
   # Reject terrain returns that project through an object mask.
-  minimum_height_above_ground_m: 0.15
+  minimum_height_above_ground_m: 0.20
   maximum_height_above_ground_m: 5.0
   vision_guided_lidar:
     # Vision selects a region to inspect but cannot block a zone by itself.

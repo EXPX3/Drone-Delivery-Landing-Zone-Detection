@@ -210,6 +210,8 @@ class LandingZoneRvizReplay(Node):
             interest_padding_m=float(dynamic["interest_padding_m"]),
             confirmation_window_scans=int(dynamic["confirmation_window_scans"]),
             clustering=dynamic.get("point_clustering"),
+            hazard_clear_after_scans=int(dynamic.get("hazard_clear_after_scans", 15)),
+            hazard_clearing_radius_m=float(dynamic.get("hazard_clearing_radius_m", 20.0)),
         )
         self.active_zones, self.blocked_zones = self.occupancy.classified_zones()
 

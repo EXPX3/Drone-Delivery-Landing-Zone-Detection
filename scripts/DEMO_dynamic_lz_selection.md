@@ -134,14 +134,17 @@ interest_padding_m: 1.0
 confirmation_hits: 2
 confirmation_window_scans: 3
 maximum_lidar_range_m: 80.0       # complete live-map integration
-rolling_horizontal_radius_m: 10.0 # landing-zone processing only
-point_stride: 3
+rolling_horizontal_radius_m: 25.0 # landing-zone processing only
+point_stride: 1                   # full safety/semantic input
+map_point_stride: 3               # visualization/map fusion only
 publish_hz: 5.0
 max_visualized_voxels: 20000
-zone_publish_hz: 5.0
+zone_publish_hz: 10.0
 gps_wind_margin_m: 2.0
-obstacle_min_height_m: 0.15
+obstacle_min_height_m: 0.20
 vertical_clearance_m: 5.0
+hazard_clear_after_scans: 15
+hazard_clearing_radius_m: 20.0
 point_clustering:
   enabled: true
   radius_m: 0.25

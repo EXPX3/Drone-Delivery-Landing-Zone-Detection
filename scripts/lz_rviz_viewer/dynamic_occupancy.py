@@ -103,7 +103,8 @@ class DynamicOccupancyMap:
                  vertical_clearance_m: float = 20.0, min_obstacle_voxels: int = 3,
                  coarse_resolution: float | None = None,
                  interest_padding_m: float = 1.0, confirmation_window_scans: int = 3,
-                 clustering: dict | None = None) -> None:
+                 clustering: dict | None = None, hazard_clear_after_scans: int = 15,
+                 hazard_clearing_radius_m: float = 20.0) -> None:
         self.resolution = float(resolution)
         self.coarse_resolution = float(coarse_resolution or resolution)
         if self.coarse_resolution < self.resolution:
@@ -113,6 +114,8 @@ class DynamicOccupancyMap:
         self.vertical_clearance_m = float(vertical_clearance_m)
         self.min_obstacle_voxels = int(min_obstacle_voxels)
         self.confirmation_window_scans = int(confirmation_window_scans)
+        self.hazard_clear_after_scans = int(hazard_clear_after_scans)
+        self.hazard_clearing_radius_m = float(hazard_clearing_radius_m)
         self.clustering = clustering or {"enabled": False}
         self.interest_padding_m = float(interest_padding_m)
         self._zone_centers = np.asarray(
@@ -138,6 +141,10 @@ class DynamicOccupancyMap:
         self.coarse_live_hits: dict[tuple[int, int, int], int] = {}
         self.hazard_observations: dict[tuple[int, int, int], list[int]] = defaultdict(list)
         self.confirmed_hazards: set[tuple[int, int, int]] = set()
+        self.hazard_last_seen: dict[tuple[int, int, int], int] = {}
+        self._hazard_zone_links: dict[
+            tuple[int, int, int], list[tuple[int, str]]
+        ] = defaultdict(list)
         self.scan_index = 0
         self.zones = zones
         self.evidence = {int(zone["rank"]): CandidateEvidence() for zone in zones}
@@ -188,7 +195,14 @@ class DynamicOccupancyMap:
         # Safety evidence is deliberately independent of map/display sampling.
         # Otherwise a valid obstacle can disappear when the fused map is thinned.
         for key in hazard_keys:
-            if key in self.confirmed_hazards:
+            nearby_confirmed = [
+                (key[0] + dx, key[1] + dy, key[2] + dz)
+                for dx in (-1, 0, 1) for dy in (-1, 0, 1) for dz in (-1, 0, 1)
+                if (key[0] + dx, key[1] + dy, key[2] + dz) in self.confirmed_hazards
+            ]
+            if nearby_confirmed:
+                for neighbor in nearby_confirmed:
+                    self.hazard_last_seen[neighbor] = self.scan_index
                 continue
             cutoff = self.scan_index - self.confirmation_window_scans + 1
             nearby_scans: set[int] = {self.scan_index}
@@ -214,6 +228,7 @@ class DynamicOccupancyMap:
             if len(nearby_scans) < required_hits:
                 continue
             self.confirmed_hazards.add(key)
+            self.hazard_last_seen[key] = self.scan_index
             changed += 1
             grid_key = (int(np.floor(center[0] / self._cell_size)),
                         int(np.floor(center[1] / self._cell_size)))
@@ -227,11 +242,39 @@ class DynamicOccupancyMap:
                 evidence = self.evidence[int(zone["rank"])]
                 if distance <= radius:
                     evidence.blocked_voxels.add(key)
+                    self._hazard_zone_links[key].append((int(zone["rank"]), "blocked"))
                     evidence.nearest_obstacle_m = min(evidence.nearest_obstacle_m, distance)
                 elif distance <= radius + self.gps_margin_m:
                     evidence.margin_voxels.add(key)
+                    self._hazard_zone_links[key].append((int(zone["rank"]), "margin"))
                     evidence.nearest_obstacle_m = min(evidence.nearest_obstacle_m, distance)
+        changed += self._clear_stale_hazards(sensor_origin)
         return changed
+
+    def _clear_stale_hazards(self, sensor_origin: np.ndarray | None) -> int:
+        """Restore candidates only after a nearby area has remained clear."""
+        if sensor_origin is None or self.hazard_clear_after_scans <= 0:
+            return 0
+        origin = np.asarray(sensor_origin, dtype=np.float64)
+        stale = [
+            key for key in self.confirmed_hazards
+            if self.scan_index - self.hazard_last_seen.get(key, self.scan_index)
+            >= self.hazard_clear_after_scans
+            and np.linalg.norm(
+                (np.asarray(key[:2], dtype=np.float64) + 0.5) * self.resolution
+                - origin[:2]
+            ) <= self.hazard_clearing_radius_m
+        ]
+        for key in stale:
+            self.confirmed_hazards.remove(key)
+            self.hazard_last_seen.pop(key, None)
+            for rank, kind in self._hazard_zone_links.pop(key, []):
+                evidence = self.evidence[rank]
+                target = evidence.blocked_voxels if kind == "blocked" else evidence.margin_voxels
+                target.discard(key)
+                if not evidence.blocked_voxels and not evidence.margin_voxels:
+                    evidence.nearest_obstacle_m = np.inf
+        return len(stale)
 
     def _clustered_hazard_points(self, points: np.ndarray,
                                  sensor_origin: np.ndarray | None) -> np.ndarray:

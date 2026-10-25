@@ -68,6 +68,12 @@ was separated.
 
 ## Selected settings
 
+> Follow-up live validation: the one-scan, 0.15 m preset below produced false
+> persistent rejections from residual ground noise. The deployed configuration
+> now uses two-of-three scan confirmation, a 0.20 m gate, and restores a blocked
+> candidate after 15 nearby scans without supporting returns. The table is kept
+> here because it records the controlled ablation that motivated that revision.
+
 ```yaml
 dynamic_occupancy:
   obstacle_min_height_m: 0.15
