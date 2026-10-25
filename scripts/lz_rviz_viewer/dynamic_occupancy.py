@@ -210,8 +210,6 @@ class DynamicOccupancyMap:
             if nearby_confirmed:
                 for neighbor in nearby_confirmed:
                     self.hazard_last_seen[neighbor] = self.scan_index
-                    if key in immediate_keys:
-                        self.persistent_hazards.add(neighbor)
                 continue
             cutoff = self.scan_index - self.confirmation_window_scans + 1
             nearby_scans: set[int] = {self.scan_index}
@@ -240,8 +238,6 @@ class DynamicOccupancyMap:
             if len(nearby_scans) < required_hits:
                 continue
             self.confirmed_hazards.add(key)
-            if key in immediate_keys:
-                self.persistent_hazards.add(key)
             self.hazard_last_seen[key] = self.scan_index
             changed += 1
             grid_key = (int(np.floor(center[0] / self._cell_size)),
@@ -422,10 +418,13 @@ class DynamicOccupancyMap:
         return active, blocked
 
     def add_confirmed_lidar_obstacles(self, points: np.ndarray) -> int:
-        """Apply independently confirmed above-ground LiDAR points as safety evidence."""
+        """Persist obstacles confirmed jointly by semantics and physical LiDAR."""
         changed = 0
         for point in np.asarray(points, dtype=np.float64):
             key = tuple(int(value) for value in np.floor(point / self.resolution))
+            self.confirmed_hazards.add(key)
+            self.persistent_hazards.add(key)
+            self.hazard_last_seen[key] = self.scan_index
             grid_key = (int(np.floor(point[0] / self._cell_size)),
                         int(np.floor(point[1] / self._cell_size)))
             for zone in self._zone_grid.get(grid_key, []):
@@ -442,6 +441,8 @@ class DynamicOccupancyMap:
                     target = evidence.margin_voxels
                 if target is not None and key not in target:
                     target.add(key)
+                    kind = "blocked" if target is evidence.blocked_voxels else "margin"
+                    self._hazard_zone_links[key].append((int(zone["rank"]), kind))
                     evidence.nearest_obstacle_m = min(evidence.nearest_obstacle_m, distance)
                     changed += 1
         return changed

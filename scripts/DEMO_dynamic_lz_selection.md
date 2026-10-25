@@ -165,10 +165,12 @@ validated_pose_replay:
   maximum_timestamp_error_s: 0.03
 ```
 
-Dense clusters at least 0.30 m above a candidate block it on their first scan and
-remain blocked because absence of an endpoint is not free-space evidence. Smaller
-or lower clusters require two observations in a three-scan window and may be
-restored after 15 supporting-return-free scans within the 20 m clearing radius.
+Dense clusters at least 0.30 m above a candidate block it on their first scan.
+Smaller or lower clusters require two observations in a three-scan window. Either
+geometry-only state may recover after 15 nearby clear scans, preventing systematic
+ground-layer noise from freezing large areas. An obstacle becomes persistent only
+when image semantics and elevated LiDAR returns agree; image evidence alone never
+blocks a candidate.
 
 This bag demonstration replays the final globally corrected trajectory and therefore
 reproduces the validated experiment exactly. A physical live sensor can use the same
