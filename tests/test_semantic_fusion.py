@@ -7,7 +7,8 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 from semantic_lz.semantic_fusion import (
-    SemanticResult, SemanticVoxelMemory, canonical_class, labels_at_pixels,
+    SemanticObjectTracker, SemanticResult, SemanticVoxelMemory,
+    canonical_class, labels_at_pixels,
 )
 
 
@@ -47,6 +48,24 @@ class SemanticFusionTests(unittest.TestCase):
         memory.update(points[:1], names[:1])
         visible, _ = memory.point_cloud()
         self.assertEqual(len(visible), 1)
+
+    def test_object_tracker_associates_neighboring_returns_without_spreading(self):
+        tracker = SemanticObjectTracker(
+            cluster_radius_m=0.5, association_radius_m=1.0,
+            confirmation_frames=3, smoothing=0.5,
+        )
+        names = np.array(["cargo_box", "cargo_box"], dtype=object)
+        tracker.update(np.array([[0.0, 0.0, 0.5], [0.1, 0.0, 0.5]]), names)
+        tracker.update(np.array([[0.25, 0.0, 0.5], [0.35, 0.0, 0.5]]), names)
+        points, _ = tracker.point_cloud()
+        self.assertEqual(len(points), 0)
+        latest = np.array([[0.45, 0.0, 0.5], [0.55, 0.0, 0.5]])
+        tracker.update(latest, names)
+        points, colors = tracker.point_cloud()
+        self.assertEqual(len(tracker.tracks), 1)
+        self.assertEqual(len(points), 3)
+        self.assertTrue(np.all(points[:2, 0] >= 0.45))
+        self.assertEqual(colors[0].tolist(), [255, 255, 0])
 
 
 if __name__ == "__main__":

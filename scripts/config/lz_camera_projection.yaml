@@ -30,20 +30,6 @@ dynamic_occupancy:
   coarse_resolution_m: 1.00
   interest_padding_m: 1.0
   confirmation_hits: 3
-  # Reject terrain returns that project through an object mask. These were the
-  # dominant source of the growing horizontal semantic halo.
-  minimum_height_above_ground_m: 0.12
-  maximum_height_above_ground_m: 3.0
-  vision_guided_lidar:
-    # Vision selects a region to inspect but cannot block a zone by itself.
-    # Blocking requires physical above-ground LiDAR support in two frames.
-    minimum_image_confidence:
-      person: 0.70
-      cargo_box: 0.25
-      vehicle: 0.30
-    minimum_lidar_points_per_frame: 2
-    confirmation_frames: 2
-    resolution_m: 0.25
   confirmation_window_scans: 3
   maximum_lidar_range_m: 80.0
   rolling_horizontal_radius_m: 10.0
@@ -126,9 +112,23 @@ semantic_segmentation:
   device: 0
   inference_stride: 3
   maximum_lidar_age_s: 0.15
-  # Persistent world-coordinate semantic memory. Missing detections do not erase
-  # labels; two positive contradictory labels in the same voxel are required.
-  memory_resolution_m: 0.20
-  contradiction_hits: 2
-  confirmation_hits: 2
+  # Object-level fusion tolerates neighboring-return jitter while retaining only
+  # the latest compact support instead of a trail of historical points.
+  object_tracking:
+    cluster_radius_m: 0.75
+    association_radius_m: 1.20
+    confirmation_frames: 3
+  # Reject terrain returns that project through an object mask.
+  minimum_height_above_ground_m: 0.12
+  maximum_height_above_ground_m: 3.0
+  vision_guided_lidar:
+    # Vision selects a region to inspect but cannot block a zone by itself.
+    minimum_image_confidence:
+      person: 0.70
+      cargo_box: 0.25
+      vehicle: 0.30
+    minimum_lidar_points_per_frame: 2
+    confirmation_frames: 2
+    cluster_radius_m: 0.75
+    association_radius_m: 1.20
 

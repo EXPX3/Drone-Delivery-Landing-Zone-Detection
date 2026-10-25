@@ -41,7 +41,7 @@ from project_lz_into_bag_camera import (  # noqa: E402
     open_reader, read_pose_and_gps, require_ros, stamp_ns,
 )
 from semantic_lz.semantic_fusion import (  # noqa: E402
-    OpenVocabularySegmenter, SemanticVoxelMemory, colorize_frame, labels_at_pixels,
+    OpenVocabularySegmenter, SemanticObjectTracker, colorize_frame, labels_at_pixels,
 )
 
 FRAME_ID = "lz_world"
@@ -220,16 +220,17 @@ class LandingZoneRvizReplay(Node):
                 confidence=float(semantic["confidence"]),
                 image_size=int(semantic["image_size"]), device=str(semantic["device"]),
             )
-        self.semantic_memory = SemanticVoxelMemory(
-            resolution_m=float(semantic.get("memory_resolution_m", 0.20)),
-            contradiction_hits=int(semantic.get("contradiction_hits", 2)),
-            confirmation_hits=int(semantic.get("confirmation_hits", 2)),
+        tracking = semantic.get("object_tracking", {})
+        self.semantic_tracker = SemanticObjectTracker(
+            cluster_radius_m=float(tracking.get("cluster_radius_m", 0.75)),
+            association_radius_m=float(tracking.get("association_radius_m", 1.2)),
+            confirmation_frames=int(tracking.get("confirmation_frames", 3)),
         )
         verification = semantic.get("vision_guided_lidar", {})
-        self.guided_lidar_memory = SemanticVoxelMemory(
-            resolution_m=float(verification.get("resolution_m", 0.25)),
-            contradiction_hits=1,
-            confirmation_hits=int(verification.get("confirmation_frames", 2)),
+        self.guided_lidar_tracker = SemanticObjectTracker(
+            cluster_radius_m=float(verification.get("cluster_radius_m", 0.75)),
+            association_radius_m=float(verification.get("association_radius_m", 1.2)),
+            confirmation_frames=int(verification.get("confirmation_frames", 2)),
         )
         self.cloud_pub.publish(point_cloud_message(cloud, self.origin))
         self.static_pub.publish(self.zone_markers(0))
@@ -582,7 +583,7 @@ class LandingZoneRvizReplay(Node):
                         ])
                         semantic_points = semantic_points[height_ok]
                         names = names[height_ok]
-                        self.semantic_memory.update(semantic_points, names)
+                        self.semantic_tracker.update(semantic_points, names)
                         verification = semantic.get("vision_guided_lidar", {})
                         thresholds = verification.get("minimum_image_confidence", {})
                         point_detection = labels[selected][height_ok] - 1
@@ -600,7 +601,7 @@ class LandingZoneRvizReplay(Node):
                                 guided_points.extend(class_points)
                                 guided_names.extend([str(class_name)] * len(class_points))
                         if guided_points:
-                            self.guided_lidar_memory.update(
+                            self.guided_lidar_tracker.update(
                                 np.asarray(guided_points), np.asarray(guided_names, dtype=object),
                             )
                         semantic_counts = {
@@ -608,8 +609,8 @@ class LandingZoneRvizReplay(Node):
                         }
                 if semantic_result is not None:
                     frame = colorize_frame(frame, semantic_result)
-                semantic_points, semantic_colors = self.semantic_memory.point_cloud()
-                confirmed_lidar_points, _ = self.guided_lidar_memory.point_cloud()
+                semantic_points, semantic_colors = self.semantic_tracker.point_cloud()
+                confirmed_lidar_points, _ = self.guided_lidar_tracker.point_cloud()
                 semantic_zone_changes = self.occupancy.add_confirmed_lidar_obstacles(
                     confirmed_lidar_points,
                 )

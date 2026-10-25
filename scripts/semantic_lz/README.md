@@ -29,14 +29,14 @@ the geometry-based safety rejection remain independent: an unrecognized obstacle
 can still invalidate a landing zone. The semantic layer is therefore descriptive
 evidence, not a replacement for geometric collision checking.
 
-The semantic RViz layer renders classified LiDAR returns as 0.22 m spheres and
-stores them in a 0.20 m world-coordinate voxel memory. Missing detections never
-erase a label. A voxel changes color only after two positive, contradictory
-classifications at that location; this avoids flicker when a person or box is
-temporarily outside the image or missed by the detector.
+The semantic RViz layer renders classified LiDAR returns as 0.22 m spheres.
+Returns within 0.75 m are grouped into an object observation and associated with
+same-class tracks within 1.20 m. Tracks require three observed frames and retain
+only their latest compact point support plus a smoothed centroid, avoiding a
+historical trail while tolerating adjacent-voxel projection jitter.
 
-Semantic voxels require three independent frame observations before display;
-duplicate returns from one scan count only once. Points below 0.12 m or above
+Object tracks require three independent frame observations before display.
+Points below 0.12 m or above
 3.0 m relative to the Bayern terrain model are rejected, removing ground returns
 that project through an object silhouette. Camera projection uses the same strip-optimized
 body trajectory as the deskewed LiDAR map; mixing raw camera poses with optimized

@@ -86,6 +86,88 @@ class SemanticVoxelMemory:
         return points, colors
 
 
+@dataclass
+class SemanticObjectTrack:
+    track_id: int
+    class_name: str
+    centroid: np.ndarray
+    points: np.ndarray
+    observations: int = 1
+
+
+class SemanticObjectTracker:
+    """Fuse sparse same-class 3D clusters into compact object tracks."""
+
+    def __init__(self, cluster_radius_m: float = 0.75, association_radius_m: float = 1.2,
+                 confirmation_frames: int = 3, smoothing: float = 0.35) -> None:
+        self.cluster_radius_m = float(cluster_radius_m)
+        self.association_radius_m = float(association_radius_m)
+        self.confirmation_frames = int(confirmation_frames)
+        self.smoothing = float(smoothing)
+        self.tracks: list[SemanticObjectTrack] = []
+        self._next_id = 1
+
+    def _clusters(self, points: np.ndarray, names: np.ndarray) -> list[tuple[str, np.ndarray]]:
+        output: list[tuple[str, np.ndarray]] = []
+        for class_name in set(names):
+            class_points = points[names == class_name]
+            remaining = set(range(len(class_points)))
+            while remaining:
+                component = {remaining.pop()}
+                frontier = list(component)
+                while frontier:
+                    current = frontier.pop()
+                    neighbors = {
+                        index for index in remaining
+                        if np.linalg.norm(class_points[index] - class_points[current])
+                        <= self.cluster_radius_m
+                    }
+                    remaining.difference_update(neighbors)
+                    component.update(neighbors)
+                    frontier.extend(neighbors)
+                output.append((str(class_name), class_points[sorted(component)]))
+        return output
+
+    def update(self, points: np.ndarray, names: np.ndarray) -> None:
+        points = np.asarray(points, dtype=np.float64)
+        names = np.asarray(names, dtype=object)
+        if not len(points):
+            return
+        used_tracks: set[int] = set()
+        for class_name, cluster in self._clusters(points, names):
+            center = np.median(cluster, axis=0)
+            candidates = [
+                (float(np.linalg.norm(track.centroid - center)), index)
+                for index, track in enumerate(self.tracks)
+                if index not in used_tracks and track.class_name == class_name
+            ]
+            distance, index = min(candidates, default=(np.inf, -1))
+            if distance <= self.association_radius_m:
+                track = self.tracks[index]
+                track.centroid = (1.0 - self.smoothing) * track.centroid + self.smoothing * center
+                track.points = cluster.copy()
+                track.observations += 1
+                used_tracks.add(index)
+            else:
+                self.tracks.append(SemanticObjectTrack(
+                    self._next_id, class_name, center.copy(), cluster.copy(),
+                ))
+                used_tracks.add(len(self.tracks) - 1)
+                self._next_id += 1
+
+    def point_cloud(self) -> tuple[np.ndarray, np.ndarray]:
+        confirmed = [track for track in self.tracks
+                     if track.observations >= self.confirmation_frames]
+        if not confirmed:
+            return np.empty((0, 3), dtype=np.float64), np.empty((0, 3), dtype=np.uint8)
+        clouds, colors = [], []
+        for track in confirmed:
+            points = np.vstack((track.points, track.centroid[None, :]))
+            clouds.append(points)
+            colors.append(np.tile(CLASS_COLORS_RGB[track.class_name], (len(points), 1)))
+        return np.vstack(clouds), np.vstack(colors).astype(np.uint8)
+
+
 class OpenVocabularySegmenter:
     """YOLOE promptable segmenter, loaded lazily to keep tests CPU-only."""
 
