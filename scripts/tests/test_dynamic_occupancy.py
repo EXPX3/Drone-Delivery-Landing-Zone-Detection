@@ -229,6 +229,17 @@ class DynamicOccupancyTests(unittest.TestCase):
         self.assertEqual(len(occupancy.occupied_centers(include_baseline=False)), 1)
         self.assertEqual(len(occupancy.classified_zones()[1]), 0)
 
+    def test_hazard_confirmation_is_independent_of_map_sampling(self):
+        occupancy = DynamicOccupancyMap(
+            np.empty((0, 3)), [zone()], resolution=0.2, coarse_resolution=1.0,
+            obstacle_min_height_m=0.15, min_obstacle_voxels=1,
+        )
+        obstacle = np.array([[1.0, 0.0, 10.5]])
+        occupancy.update(
+            np.empty((0, 3)), np.zeros(3), hazard_points=obstacle,
+        )
+        self.assertEqual(len(occupancy.classified_zones()[1]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

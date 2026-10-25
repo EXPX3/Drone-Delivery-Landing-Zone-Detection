@@ -29,13 +29,16 @@ dynamic_occupancy:
   resolution_m: 0.20
   coarse_resolution_m: 1.00
   interest_padding_m: 1.0
-  confirmation_hits: 3
+  confirmation_hits: 1
   confirmation_window_scans: 3
   maximum_lidar_range_m: 80.0
-  rolling_horizontal_radius_m: 10.0
-  point_stride: 3
+  rolling_horizontal_radius_m: 25.0
+  # Preserve every return for obstacle and semantic processing. Only the
+  # evolving visualization/map fusion stream is downsampled for efficiency.
+  point_stride: 1
+  map_point_stride: 3
   publish_hz: 5.0
-  zone_publish_hz: 5.0
+  zone_publish_hz: 10.0
   max_visualized_voxels: 20000
   # Reuse the risk model's wind/GNSS margin. Confirmed occupancy inside a zone
   # blocks it; occupancy inside this outer margin downgrades it to risky.
@@ -119,8 +122,8 @@ semantic_segmentation:
     association_radius_m: 1.20
     confirmation_frames: 3
   # Reject terrain returns that project through an object mask.
-  minimum_height_above_ground_m: 0.12
-  maximum_height_above_ground_m: 3.0
+  minimum_height_above_ground_m: 0.15
+  maximum_height_above_ground_m: 5.0
   vision_guided_lidar:
     # Vision selects a region to inspect but cannot block a zone by itself.
     minimum_image_confidence:
@@ -128,7 +131,7 @@ semantic_segmentation:
       cargo_box: 0.25
       vehicle: 0.30
     minimum_lidar_points_per_frame: 2
-    confirmation_frames: 2
+    confirmation_frames: 1
     cluster_radius_m: 0.75
     association_radius_m: 1.20
 

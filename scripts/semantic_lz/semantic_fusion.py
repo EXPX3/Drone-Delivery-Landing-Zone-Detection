@@ -167,6 +167,19 @@ class SemanticObjectTracker:
             colors.append(np.tile(CLASS_COLORS_RGB[track.class_name], (len(points), 1)))
         return np.vstack(clouds), np.vstack(colors).astype(np.uint8)
 
+    def summaries(self) -> list[dict]:
+        return [
+            {
+                "track_id": track.track_id,
+                "class_name": track.class_name,
+                "observations": track.observations,
+                "confirmed": track.observations >= self.confirmation_frames,
+                "centroid": track.centroid.tolist(),
+                "latest_point_count": len(track.points),
+            }
+            for track in self.tracks
+        ]
+
 
 class OpenVocabularySegmenter:
     """YOLOE promptable segmenter, loaded lazily to keep tests CPU-only."""

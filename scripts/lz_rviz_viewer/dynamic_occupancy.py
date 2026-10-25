@@ -185,7 +185,10 @@ class DynamicOccupancyMap:
             key = tuple(int(v) for v in row)
             hits = self.live_hits.get(key, 0) + 1
             self.live_hits[key] = hits
-            if key not in hazard_keys or key in self.confirmed_hazards:
+        # Safety evidence is deliberately independent of map/display sampling.
+        # Otherwise a valid obstacle can disappear when the fused map is thinned.
+        for key in hazard_keys:
+            if key in self.confirmed_hazards:
                 continue
             cutoff = self.scan_index - self.confirmation_window_scans + 1
             nearby_scans: set[int] = {self.scan_index}

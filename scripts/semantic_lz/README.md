@@ -35,10 +35,10 @@ same-class tracks within 1.20 m. Tracks require three observed frames and retain
 only their latest compact point support plus a smoothed centroid, avoiding a
 historical trail while tolerating adjacent-voxel projection jitter.
 
-Object tracks require three independent frame observations before display.
-Points below 0.12 m or above
-3.0 m relative to the Bayern terrain model are rejected, removing ground returns
-that project through an object silhouette. Camera projection uses the same strip-optimized
+Object tracks require three independent frame observations before display. The
+colored layer follows PointPainting and retains synchronized LiDAR returns inside
+the image mask; those colors are semantic evidence, not geometric safety proof.
+Safety accepts only returns 0.15-5.0 m above the Bayern terrain model. Camera projection uses the same strip-optimized
 body trajectory as the deskewed LiDAR map; mixing raw camera poses with optimized
 LiDAR poses previously caused repeated observations to spread into a halo.
 

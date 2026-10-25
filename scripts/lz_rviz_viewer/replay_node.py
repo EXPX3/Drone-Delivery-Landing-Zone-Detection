@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
+import json
 import sys
 import threading
 import time
@@ -150,9 +152,25 @@ class LandingZoneRvizReplay(Node):
     def __init__(self, args: argparse.Namespace) -> None:
         super().__init__("landing_zone_rviz_replay")
         self.args = args
+        self.metrics = {
+            "detections": Counter(), "projected_points": Counter(),
+            "above_ground_points": Counter(), "guided_points": Counter(),
+            "height_residuals_m": {},
+        }
         self.stop = threading.Event()
         with args.config.open(encoding="utf-8") as handle:
             self.config = yaml.safe_load(handle)
+        dynamic_overrides = self.config["dynamic_occupancy"]
+        if args.point_stride is not None:
+            dynamic_overrides["point_stride"] = args.point_stride
+        if args.rolling_radius is not None:
+            dynamic_overrides["rolling_horizontal_radius_m"] = args.rolling_radius
+        if args.confirmation_hits is not None:
+            dynamic_overrides["confirmation_hits"] = args.confirmation_hits
+        if args.semantic_min_height is not None:
+            self.config["semantic_segmentation"]["minimum_height_above_ground_m"] = (
+                args.semantic_min_height
+            )
         self.zones = load_landing_zones(args.zones, None, 0)
         full_cloud = read_ascii_pcd(args.pcd, 0)
         ground_cloud = read_ascii_pcd(args.ground_pcd, 0)
@@ -417,6 +435,7 @@ class LandingZoneRvizReplay(Node):
                 self.config["dynamic_occupancy"]["rolling_horizontal_radius_m"]
             )
             lidar_stride = int(self.config["dynamic_occupancy"]["point_stride"])
+            map_stride = int(self.config["dynamic_occupancy"].get("map_point_stride", 1))
             corrected_alignment_ready = False
             lidar_timings: dict[str, list[float]] = {
                 "transform": [], "occupancy": [], "zone_publish": [],
@@ -476,7 +495,7 @@ class LandingZoneRvizReplay(Node):
                     )
                     hazard_points = ortho_points[horizontal_distance <= rolling_radius]
                     changed = self.occupancy.update(
-                        ortho_points, lidar_origin, hazard_points=hazard_points,
+                        ortho_points[::map_stride], lidar_origin, hazard_points=hazard_points,
                     )
                     occupied_at = time.perf_counter()
                     lidar_frame_number += 1
@@ -485,16 +504,18 @@ class LandingZoneRvizReplay(Node):
                         zones_dirty = True
                     if (zones_dirty and (last_zone_publish is None
                             or timestamp - last_zone_publish >= zone_interval_ns)):
-                        self.static_pub.publish(self.zone_markers(timestamp))
+                        if self.args.metrics_json is None:
+                            self.static_pub.publish(self.zone_markers(timestamp))
                         last_zone_publish = timestamp
                         zones_dirty = False
                     zone_published_at = time.perf_counter()
                     if (last_occupancy_publish is None
                             or timestamp - last_occupancy_publish >= occupancy_interval_ns):
-                        live_map = self.occupancy.occupied_centers(include_baseline=False)
-                        cloud_message = point_cloud_message(live_map, self.origin)
-                        ros_stamp(cloud_message, timestamp)
-                        self.occupancy_cloud_pub.publish(cloud_message)
+                        if self.args.metrics_json is None:
+                            live_map = self.occupancy.occupied_centers(include_baseline=False)
+                            cloud_message = point_cloud_message(live_map, self.origin)
+                            ros_stamp(cloud_message, timestamp)
+                            self.occupancy_cloud_pub.publish(cloud_message)
                         last_occupancy_publish = timestamp
                     scan_finished = time.perf_counter()
                     for name, value in (
@@ -518,6 +539,9 @@ class LandingZoneRvizReplay(Node):
                 timestamp = stamp_ns(message, bag_time)
                 if first_stamp is None:
                     first_stamp = timestamp
+                if (self.args.max_bag_seconds is not None
+                        and timestamp - first_stamp > self.args.max_bag_seconds * 1e9):
+                    break
                 if last_publish is not None and timestamp - last_publish < interval_ns:
                     continue
                 desired = (timestamp - first_stamp) / 1e9 / self.args.rate
@@ -552,6 +576,7 @@ class LandingZoneRvizReplay(Node):
                 inference_stride = int(semantic.get("inference_stride", 1))
                 if self.segmenter is not None and frame_number % inference_stride == 0:
                     semantic_result = self.segmenter.predict(frame)
+                    self.metrics["detections"].update(semantic_result.class_names)
                 ranks: list[int] = []
                 draw_zones(frame, self.active_zones, map_to_optical, utm_to_map, camera_matrix,
                            distortion, vertical_offset, 0.25, visible_ranks_out=ranks)
@@ -567,23 +592,40 @@ class LandingZoneRvizReplay(Node):
                         optical_points, camera_matrix, distortion,
                     )
                     labels = labels_at_pixels(semantic_result, pixels, in_front)
+                    projected_names = np.asarray(semantic_result.class_names, dtype=object)[
+                        labels[labels > 0] - 1
+                    ]
+                    self.metrics["projected_points"].update(map(str, projected_names))
                     selected = labels > 0
                     if np.any(selected):
                         semantic_points = latest_lidar_points[selected]
                         names = np.asarray(semantic_result.class_names, dtype=object)[labels[selected] - 1]
+                        # PointPainting-style visualization keeps all synchronized
+                        # returns in the semantic mask. Safety uses only the
+                        # independently height-verified subset below.
+                        self.semantic_tracker.update(semantic_points, names)
                         minimum_height = float(semantic.get("minimum_height_above_ground_m", 0.12))
                         maximum_height = float(semantic.get("maximum_height_above_ground_m", 3.0))
                         ground = np.asarray([
                             self.terrain.height(float(point[0]), float(point[1]))
                             for point in semantic_points
                         ], dtype=object)
+                        for class_name in set(names):
+                            values = [
+                                float(point[2] - float(value))
+                                for point, value, name in zip(semantic_points, ground, names)
+                                if name == class_name and value is not None
+                            ]
+                            self.metrics["height_residuals_m"].setdefault(
+                                str(class_name), []
+                            ).extend(values)
                         height_ok = np.asarray([
                             value is not None and minimum_height <= point[2] - float(value) <= maximum_height
                             for point, value in zip(semantic_points, ground)
                         ])
                         semantic_points = semantic_points[height_ok]
                         names = names[height_ok]
-                        self.semantic_tracker.update(semantic_points, names)
+                        self.metrics["above_ground_points"].update(map(str, names))
                         verification = semantic.get("vision_guided_lidar", {})
                         thresholds = verification.get("minimum_image_confidence", {})
                         point_detection = labels[selected][height_ok] - 1
@@ -601,6 +643,7 @@ class LandingZoneRvizReplay(Node):
                                 guided_points.extend(class_points)
                                 guided_names.extend([str(class_name)] * len(class_points))
                         if guided_points:
+                            self.metrics["guided_points"].update(guided_names)
                             self.guided_lidar_tracker.update(
                                 np.asarray(guided_points), np.asarray(guided_names, dtype=object),
                             )
@@ -616,7 +659,8 @@ class LandingZoneRvizReplay(Node):
                 )
                 if semantic_zone_changes:
                     self.active_zones, self.blocked_zones = self.occupancy.classified_zones()
-                    self.static_pub.publish(self.zone_markers(timestamp))
+                    if self.args.metrics_json is None:
+                        self.static_pub.publish(self.zone_markers(timestamp))
                 semantic_cloud = colored_point_cloud_message(
                     semantic_points, semantic_colors, self.origin,
                 )
@@ -655,8 +699,9 @@ class LandingZoneRvizReplay(Node):
                     timestamp, [zones_by_rank[rank] for rank in ranks if rank in zones_by_rank], trajectory,
                     uav, ortho_to_optical.translation, footprint, frame_number, tf_uav,
                 )
-                self.publish_image(frame, timestamp)
-                self.dynamic_pub.publish(replay_markers)
+                if self.args.metrics_json is None:
+                    self.publish_image(frame, timestamp)
+                    self.dynamic_pub.publish(replay_markers)
                 last_publish = timestamp
                 if frame_number == 1 or frame_number % 120 == 0:
                     self.get_logger().info(
@@ -664,6 +709,35 @@ class LandingZoneRvizReplay(Node):
                         f"{len(self.active_zones)} active, {len(self.blocked_zones)} blocked"
                     )
             self.get_logger().info("Replay complete")
+            if self.args.metrics_json is not None:
+                report = {}
+                for key, value in self.metrics.items():
+                    if isinstance(value, Counter):
+                        report[key] = dict(value)
+                    elif key == "height_residuals_m":
+                        report[key] = {
+                            name: {
+                                "count": len(values),
+                                "minimum": min(values) if values else None,
+                                "median": float(np.median(values)) if values else None,
+                                "p95": float(np.percentile(values, 95)) if values else None,
+                                "maximum": max(values) if values else None,
+                            }
+                            for name, values in value.items()
+                        }
+                    else:
+                        report[key] = value
+                report.update({
+                    "semantic_tracks": self.semantic_tracker.summaries(),
+                    "guided_lidar_tracks": self.guided_lidar_tracker.summaries(),
+                    "active_landing_zones": len(self.active_zones),
+                    "blocked_landing_zones": len(self.blocked_zones),
+                    "lidar_frames": lidar_frame_number,
+                    "image_frames": frame_number,
+                })
+                self.args.metrics_json.parent.mkdir(parents=True, exist_ok=True)
+                self.args.metrics_json.write_text(json.dumps(report, indent=2), encoding="utf-8")
+                rclpy.shutdown()
         except Exception as exc:
             if rclpy.ok() and not self.stop.is_set():
                 self.get_logger().error(f"Replay failed: {exc}")
@@ -687,6 +761,12 @@ def main() -> int:
                         default=root / "scripts/bag_lio_mapping/kiss_icp_config.yaml")
     parser.add_argument("--semantic-weights", type=str,
                         default=str(root / "pcds/semantic_experiment/models/yoloe-11s-seg.pt"))
+    parser.add_argument("--metrics-json", type=Path)
+    parser.add_argument("--point-stride", type=int)
+    parser.add_argument("--rolling-radius", type=float)
+    parser.add_argument("--confirmation-hits", type=int)
+    parser.add_argument("--semantic-min-height", type=float)
+    parser.add_argument("--max-bag-seconds", type=float)
     args = parser.parse_args()
     rclpy.init()
     node = LandingZoneRvizReplay(args)
