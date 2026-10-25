@@ -408,29 +408,66 @@ class LandingZoneRvizReplay(Node):
             eigenvalues, eigenvectors = eigenvalues[order], eigenvectors[:, order]
             center = np.median(centers, axis=0)
             color_rgb = self.guided_lidar_tracker.track_color(track) / 255.0
-            color = (float(color_rgb[0]), float(color_rgb[1]), float(color_rgb[2]), 1.0)
-            ellipse = marker(1000 + 2 * track.track_id, "semantic_uncertainty",
-                             Marker.LINE_STRIP, color, 0.10, timestamp_ns)
+            rgb = (float(color_rgb[0]), float(color_rgb[1]), float(color_rgb[2]))
             angles = np.linspace(0.0, 2.0 * np.pi, 49)
-            # Two empirical standard deviations, with a 0.10 m visibility floor.
-            axes = np.maximum(2.0 * np.sqrt(np.maximum(eigenvalues, 0.0)), 0.10)
-            offsets = (eigenvectors @ np.vstack((axes[0] * np.cos(angles),
-                                                  axes[1] * np.sin(angles)))).T
-            for offset in offsets:
-                local = center - self.origin
-                ellipse.points.append(Point(x=float(local[0] + offset[0]),
-                                            y=float(local[1] + offset[1]),
-                                            z=float(local[2] + 0.35)))
-            text_marker = marker(1001 + 2 * track.track_id, "semantic_track_labels",
-                                 Marker.TEXT_VIEW_FACING, color, 0.45, timestamp_ns)
+            sigma_axes = np.maximum(np.sqrt(np.maximum(eigenvalues, 0.0)), 0.05)
+            local = center - self.origin
+            # Oriented 1/2/3-sigma projections of the empirical XY covariance.
+            for sigma_index, alpha in ((1, 1.0), (2, 0.72), (3, 0.46)):
+                contour = marker(
+                    10000 + 10 * track.track_id + sigma_index,
+                    f"semantic_covariance_{sigma_index}sigma", Marker.LINE_STRIP,
+                    (*rgb, alpha), 0.05 + 0.02 * (4 - sigma_index), timestamp_ns,
+                )
+                axes = sigma_index * sigma_axes
+                offsets = (eigenvectors @ np.vstack((
+                    axes[0] * np.cos(angles), axes[1] * np.sin(angles),
+                ))).T
+                for offset in offsets:
+                    contour.points.append(Point(x=float(local[0] + offset[0]),
+                                                y=float(local[1] + offset[1]),
+                                                z=float(local[2] + 0.30)))
+                semantic_markers.append(contour)
+
+            # Normalized bivariate-Gaussian wireframe. Its footprint is the same
+            # covariance as the contours; Z shows relative density, not altitude.
+            bell = marker(10000 + 10 * track.track_id + 4, "semantic_gaussian_surface",
+                          Marker.LINE_LIST, (*rgb, 0.72), 0.035, timestamp_ns)
+            bell_radii = np.linspace(0.0, 3.0, 7)
+            bell_angles = np.linspace(0.0, 2.0 * np.pi, 33)
+
+            def bell_point(radius: float, angle: float) -> Point:
+                offset = eigenvectors @ np.array([
+                    radius * sigma_axes[0] * np.cos(angle),
+                    radius * sigma_axes[1] * np.sin(angle),
+                ])
+                height = 0.30 + 0.90 * np.exp(-0.5 * radius * radius)
+                return Point(x=float(local[0] + offset[0]),
+                             y=float(local[1] + offset[1]),
+                             z=float(local[2] + height))
+
+            for radius in bell_radii[1:]:
+                for angle_index in range(len(bell_angles) - 1):
+                    bell.points.extend((bell_point(radius, bell_angles[angle_index]),
+                                        bell_point(radius, bell_angles[angle_index + 1])))
+            for angle in bell_angles[::4]:
+                for radius_index in range(len(bell_radii) - 1):
+                    bell.points.extend((bell_point(bell_radii[radius_index], angle),
+                                        bell_point(bell_radii[radius_index + 1], angle)))
+            semantic_markers.append(bell)
+
+            text_marker = marker(10000 + 10 * track.track_id + 5, "semantic_track_labels",
+                                 Marker.TEXT_VIEW_FACING, (*rgb, 1.0), 0.38, timestamp_ns)
             local = center - self.origin
             text_marker.pose.position = Point(x=float(local[0]), y=float(local[1]),
-                                              z=float(local[2] + 0.75))
+                                              z=float(local[2] + 1.35))
             radial = np.linalg.norm(centers[:, :2] - center[:2], axis=1)
-            text_marker.text = (f"{track.class_name} #{track.track_id} | "
-                                f"SD {np.sqrt(max(eigenvalues)):.2f} m | "
-                                f"P95 {np.percentile(radial, 95):.2f} m")
-            semantic_markers.extend((ellipse, text_marker))
+            text_marker.text = (
+                f"{track.class_name} #{track.track_id} | P95 {np.percentile(radial, 95):.2f} m\n"
+                f"Cov XY [m^2] [{covariance[0, 0]:.3f} {covariance[0, 1]:+.3f}; "
+                f"{covariance[1, 0]:+.3f} {covariance[1, 1]:.3f}]"
+            )
+            semantic_markers.append(text_marker)
         return MarkerArray(markers=[
             clear, pink, trail, aircraft, outline, rays, label, registration,
             *semantic_markers,

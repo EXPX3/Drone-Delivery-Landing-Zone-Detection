@@ -51,8 +51,11 @@ identify a unique causal split, so P95 is exposed to downstream consumers.
   elevated physical LiDAR support.
 - Pathological masks and spatially broad components are rejected.
 - Tracks keep only current compact support and bounded centroid history.
-- Same-class instances get distinct colors, IDs, SD, and radial P95 labels.
-- `/ddlzd/semantic_object_uncertainty` publishes machine-readable track state.
+- Cargo-box support points remain bright yellow; instances get IDs, full empirical
+  XY covariance matrices, radial P95 labels, oriented 1/2/3-sigma contours, and a
+  normalized Gaussian wireframe projection.
+- `/ddlzd/semantic_object_uncertainty` publishes machine-readable track state,
+  including `empirical_covariance_xy_m2`.
 - Stale semantic evidence expires; ordinary LiDAR can still block immediately.
 - The full map remains displayable, while safety processing stays local.
 

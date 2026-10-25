@@ -94,14 +94,14 @@ class SemanticFusionTests(unittest.TestCase):
         self.assertEqual(len(accepted), 1)
         self.assertEqual(len(accepted[0]), 3)
 
-    def test_tracker_expires_stale_object_and_assigns_instance_colors(self):
+    def test_tracker_expires_stale_object_and_keeps_boxes_bright_yellow(self):
         tracker = SemanticObjectTracker(
             confirmation_frames=1, maximum_age_frames=2, association_radius_m=0.5,
         )
         tracker.update(np.array([[0.0, 0.0, 0.5]]), np.array(["cargo_box"]), frame_index=1)
         tracker.update(np.array([[2.0, 0.0, 0.5]]), np.array(["cargo_box"]), frame_index=2)
         _, colors = tracker.point_cloud()
-        self.assertFalse(np.array_equal(colors[0], colors[-1]))
+        self.assertTrue(np.all(colors == np.array([255, 255, 0])))
         tracker.expire(4)
         self.assertEqual([track.track_id for track in tracker.tracks], [2])
 

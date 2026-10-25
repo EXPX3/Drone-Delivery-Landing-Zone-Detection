@@ -209,7 +209,9 @@ class SemanticObjectTracker:
         for track in confirmed:
             points = np.vstack((track.points, track.centroid[None, :]))
             clouds.append(points)
-            colors.append(np.tile(self.track_color(track), (len(points), 1)))
+            color = (np.asarray(CLASS_COLORS_RGB["cargo_box"], dtype=np.uint8)
+                     if track.class_name == "cargo_box" else self.track_color(track))
+            colors.append(np.tile(color, (len(points), 1)))
         return np.vstack(clouds), np.vstack(colors).astype(np.uint8)
 
     def summaries(self) -> list[dict]:
@@ -218,6 +220,8 @@ class SemanticObjectTracker:
             centers = np.asarray(track.centers, dtype=np.float64)
             center = np.median(centers, axis=0)
             radial = np.linalg.norm(centers[:, :2] - center[:2], axis=1)
+            covariance_xy = (np.cov(centers[:, :2], rowvar=False)
+                             if len(centers) > 1 else np.eye(2) * 0.01)
             output.append({
                 "track_id": track.track_id,
                 "class_name": track.class_name,
@@ -228,6 +232,7 @@ class SemanticObjectTracker:
                 "last_frame": track.last_frame,
                 "confidence": track.confidence,
                 "empirical_std_xyz_m": np.std(centers, axis=0).tolist(),
+                "empirical_covariance_xy_m2": covariance_xy.tolist(),
                 "empirical_radial_p95_m": float(np.percentile(radial, 95)),
             })
         return output

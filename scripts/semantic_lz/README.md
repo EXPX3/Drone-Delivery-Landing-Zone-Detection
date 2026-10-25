@@ -6,7 +6,7 @@ static and updated maps; compact physically verified semantic tracks are an
 additional RGB layer:
 
 - magenta: person
-- yellow: cargo box/package/crate
+- bright yellow (`RGB 255,255,0`): cargo box/package/crate
 - blue: vehicle
 
 The white-topped test box uses the appearance-specific prompt `white rectangular
@@ -41,7 +41,9 @@ evidence, not a replacement for geometric collision checking.
 The semantic RViz layer renders only compact connected LiDAR components 0.20-5.0 m
 above the Bayern terrain model. It rejects oversized masks, broad components, and
 class-specific low-confidence detections. Same-class instances receive distinct
-track colors and labels with empirical horizontal SD and radial P95. Tracks retain
+track IDs and labels with the full empirical XY covariance matrix and radial P95.
+RViz draws oriented 1/2/3-sigma contours plus a normalized Gaussian wireframe;
+the wireframe height represents relative likelihood, not physical altitude. Tracks retain
 only current physical support and a bounded observation history, then expire after
 90 processed frames without support.
 
