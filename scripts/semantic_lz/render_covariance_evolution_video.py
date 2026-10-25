@@ -19,8 +19,10 @@ from render_object_orthophoto import PCDS, read_pcd_bounds
 
 COLORS = {"cargo_box": "#ffe100", "person": "#ff00dc"}
 THRESHOLDS = {
-    "cargo_box": {"confidence": 0.10, "mask": 0.08, "points": 2, "radial": 0.75},
-    "person": {"confidence": 0.30, "mask": 0.05, "points": 2, "radial": 0.80},
+    "cargo_box": {"confidence": 0.10, "mask": 0.08, "points": 2,
+                  "radial": 0.75, "reference_points": 10},
+    "person": {"confidence": 0.30, "mask": 0.05, "points": 2,
+               "radial": 0.80, "reference_points": 5},
 }
 
 
@@ -56,7 +58,17 @@ def accepted_observations(raw: list[dict], targets: list[dict], association_m: f
         distances = [np.linalg.norm(point[:2] - target["final_center"][:2]) for target in candidates]
         nearest = int(np.argmin(distances))
         if distances[nearest] <= association_m:
-            candidates[nearest]["observations"].append((float(item["relative_time_s"]), point))
+            support_score = 1.0 - np.exp(-support["count"] / rule["reference_points"])
+            compactness_score = np.exp(
+                -0.5 * (support["radial_p95_m"] / rule["radial"]) ** 2
+            )
+            lidar_score = float(np.sqrt(support_score * compactness_score))
+            camera_score = float(item["confidence"])
+            fused_score = float(np.sqrt(camera_score * lidar_score))
+            candidates[nearest]["observations"].append(
+                (float(item["relative_time_s"]), point,
+                 camera_score, lidar_score, fused_score)
+            )
 
 
 def main() -> int:
@@ -141,9 +153,10 @@ def main() -> int:
 
         active = []
         for target in targets:
-            values = [point for timestamp, point in target["observations"] if timestamp <= bag_time]
-            if not values:
+            observations = [item for item in target["observations"] if item[0] <= bag_time]
+            if not observations:
                 continue
+            values = [item[1] for item in observations]
             points = np.asarray(values)
             center = np.median(points, axis=0)
             matrix = covariance(points)
@@ -162,7 +175,8 @@ def main() -> int:
                             weight="bold", zorder=7,
                             bbox=dict(boxstyle="round,pad=.25", fc="#111722", ec=color, alpha=.86))
             if confirmed_now:
-                active.append((target, points, center, matrix, color))
+                scores = np.asarray([item[2:] for item in observations], dtype=np.float64)
+                active.append((target, points, center, matrix, color, scores))
 
         for first_index in range(len(active)):
             for second_index in range(first_index + 1, len(active)):
@@ -186,7 +200,7 @@ def main() -> int:
         ax_3d.set_ylim(view[2] - local_origin[1], view[3] - local_origin[1])
         ax_3d.set_zlim(0.0, 1.1)
         ax_3d.view_init(elev=34, azim=-58)
-        for target, points, center, matrix, color in active:
+        for target, points, center, matrix, color, _scores in active:
             values, vectors = np.linalg.eigh(matrix)
             values = np.maximum(values, 0.0025)
             u = np.linspace(-3.0, 3.0, 28)
@@ -211,16 +225,18 @@ def main() -> int:
         if not active:
             ax_metrics.text(0.0, y, "Waiting for three consistent observations...",
                             color="#b7bec9", transform=ax_metrics.transAxes)
-        for target, points, center, matrix, color in active:
+        for target, points, center, matrix, color, scores in active:
             radial = np.linalg.norm(points[:, :2] - np.median(points[:, :2], axis=0), axis=1)
             p95 = np.percentile(radial, 95)
+            camera_score, lidar_score, fused_score = np.median(scores, axis=0)
             text = (f"{target['name']} | n={len(points)} | P95={p95:.3f} m\n"
+                    f"Ccam={camera_score:.3f}  Clidar={lidar_score:.3f}  Cfused={fused_score:.3f}\n"
                     f"E={center[0]:.3f}, N={center[1]:.3f}, Z={center[2]:.3f} m\n"
                     f"Cov XY [m²]  [{matrix[0, 0]:.4f}  {matrix[0, 1]:+.4f}]\n"
                     f"             [{matrix[1, 0]:+.4f}  {matrix[1, 1]:.4f}]")
             ax_metrics.text(0.0, y, text, color=color, family="monospace", fontsize=9.2,
                             va="top", transform=ax_metrics.transAxes)
-            y -= 0.225
+            y -= 0.235
         fig.suptitle(f"Semantic object localization uncertainty | bag t={bag_time:6.1f}/{duration:.1f} s | "
                      f"{args.playback_speed:g}x", fontsize=18, weight="bold")
         fig.canvas.draw()

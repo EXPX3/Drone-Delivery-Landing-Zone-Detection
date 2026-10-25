@@ -72,6 +72,38 @@ recognition evidence for one observation, while covariance measures the spatial
 spread of repeated accepted 3D localizations. They are therefore reported side by
 side and are not multiplied into one uncalibrated score.
 
+### Camera, LiDAR, and Combined Evidence
+
+For separate modality reporting, the following bounded engineering scores are used:
+
+```text
+point support:       Cn = 1 - exp(-N / Nref)
+compactness:         Cr = exp(-0.5 * (radial_P95 / radial_limit)^2)
+LiDAR evidence:      Clidar = sqrt(Cn * Cr)
+combined evidence:   Cfused = sqrt(Ccamera * Clidar)
+```
+
+`Nref` is 10 returns for cargo and 5 for a person. The radial limits are the
+deployed compactness limits, 0.75 m and 0.80 m respectively. The geometric mean is
+conservative: either weak modality lowers the fused score. Median full-bag results:
+
+| Object | Camera-only median [range] | LiDAR-only median [range] | Combined median [range] |
+|---|---:|---:|---:|
+| Cargo 1 | 0.818 [0.509, 0.895] | 0.705 [0.425, 0.901] | 0.755 [0.465, 0.891] |
+| Cargo 2 | 0.732 [0.427, 0.874] | 0.757 [0.462, 0.886] | 0.722 [0.466, 0.853] |
+| Cargo 3 | 0.331 [0.122, 0.617] | 0.779 [0.426, 0.898] | 0.505 [0.310, 0.739] |
+| Person 1 | 0.538 [0.345, 0.646] | 0.671 [0.574, 0.895] | 0.555 [0.481, 0.760] |
+
+The separation reveals useful behavior hidden by one score: Cargo 3 has weak camera
+evidence but the strongest median LiDAR evidence, while Cargo 1 is strongest in the
+camera. The combined score does not permit strong LiDAR geometry to completely hide
+weak visual recognition.
+
+Only `Ccamera` is emitted by a learned detector. `Clidar` and `Cfused` are explicitly
+defined, reproducible evidence scores, not calibrated probabilities. Converting
+them to probabilities requires labeled positive/negative scenes and held-out
+calibration using reliability diagrams, Brier score, or expected calibration error.
+
 The full-bag robust centers moved 0.181, 0.306, and 0.367 m from the corresponding
 150 s validation centers for Cargo 1/2/3. Person 1 moved 0.091 m. This demonstrates
 why covariance must evolve as repeated passes arrive and why a first-pass location
