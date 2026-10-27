@@ -89,6 +89,69 @@ class SemanticVoxelMemory:
         return points, colors
 
 
+class VisionProposalTracker:
+    """Short-term 3D display memory for camera-only ground projections."""
+
+    def __init__(self, association_radius_m: float = 2.0,
+                 retention_s: dict[str, float] | None = None,
+                 smoothing: float = 0.35) -> None:
+        self.association_radius_m = float(association_radius_m)
+        self.retention_s = retention_s or {
+            "person": 2.0, "cargo_box": 3.0, "vehicle": 3.0,
+        }
+        self.smoothing = float(smoothing)
+        self.proposals: list[dict] = []
+        self._next_id = 1
+
+    def update(self, detections: list[dict], timestamp_ns: int) -> list[dict]:
+        used: set[int] = set()
+        for detection in detections:
+            center = np.asarray(detection["center"], dtype=np.float64)
+            candidates = [
+                (float(np.linalg.norm(np.asarray(item["center"])[:2] - center[:2])), index)
+                for index, item in enumerate(self.proposals)
+                if index not in used and item["class_name"] == detection["class_name"]
+            ]
+            distance, index = min(candidates, default=(np.inf, -1))
+            if distance <= self.association_radius_m:
+                item = self.proposals[index]
+                item["center"] = (
+                    (1.0 - self.smoothing) * np.asarray(item["center"])
+                    + self.smoothing * center
+                )
+                item["covariance_xy"] = (
+                    (1.0 - self.smoothing) * np.asarray(item["covariance_xy"])
+                    + self.smoothing * np.asarray(detection["covariance_xy"])
+                )
+                item["confidence"] = float(detection["confidence"])
+                item["maximum_confidence"] = max(
+                    float(item["maximum_confidence"]), float(detection["confidence"]),
+                )
+                item["observations"] += 1
+                item["last_seen_ns"] = int(timestamp_ns)
+                used.add(index)
+            else:
+                item = dict(detection)
+                item.update({
+                    "proposal_id": self._next_id,
+                    "maximum_confidence": float(detection["confidence"]),
+                    "observations": 1,
+                    "last_seen_ns": int(timestamp_ns),
+                })
+                self.proposals.append(item)
+                used.add(len(self.proposals) - 1)
+                self._next_id += 1
+        return self.active(timestamp_ns)
+
+    def active(self, timestamp_ns: int) -> list[dict]:
+        self.proposals = [
+            item for item in self.proposals
+            if (timestamp_ns - int(item["last_seen_ns"])) / 1e9
+            <= float(self.retention_s.get(item["class_name"], 2.0))
+        ]
+        return self.proposals
+
+
 @dataclass
 class SemanticObjectTrack:
     track_id: int

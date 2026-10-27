@@ -189,6 +189,13 @@ semantic_segmentation:
       cargo_box: 0.75
       vehicle: 3.50
     minimum_lidar_points_per_frame: 2
+    # Camera-only ground-projected markers tolerate short detector dropouts.
+    # They are visualization evidence only and never block a landing zone.
+    vision_proposal_association_radius_m: 2.0
+    vision_proposal_retention_s:
+      person: 2.0
+      cargo_box: 3.0
+      vehicle: 3.0
     # Require independent temporal support, then retain the confirmed object in
     # RViz for cross-pass comparison. Safety refresh remains separately bounded.
     confirmation_frames: 3

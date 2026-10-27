@@ -9,10 +9,32 @@ import numpy as np
 SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
 
-from semantic_lz.semantic_fusion import SemanticObjectTracker
+from semantic_lz.semantic_fusion import SemanticObjectTracker, VisionProposalTracker
 
 
 class SemanticTrackingTests(unittest.TestCase):
+    @staticmethod
+    def proposal(x=0.0, confidence=0.8):
+        return {
+            "class_name": "person", "confidence": confidence,
+            "center": np.array([x, 0.0, 1.0]),
+            "covariance_xy": np.eye(2) * 0.25,
+        }
+
+    def test_camera_person_survives_short_detection_dropout(self):
+        tracker = VisionProposalTracker(retention_s={"person": 2.0})
+        tracker.update([self.proposal()], 1_000_000_000)
+        self.assertEqual(len(tracker.active(2_900_000_000)), 1)
+        self.assertEqual(len(tracker.active(3_100_000_000)), 0)
+
+    def test_camera_person_updates_existing_proposal(self):
+        tracker = VisionProposalTracker(association_radius_m=2.0)
+        tracker.update([self.proposal(0.0)], 1_000_000_000)
+        tracker.update([self.proposal(1.0, 0.9)], 2_000_000_000)
+        self.assertEqual(len(tracker.proposals), 1)
+        self.assertEqual(tracker.proposals[0]["observations"], 2)
+        self.assertEqual(tracker.proposals[0]["proposal_id"], 1)
+
     def test_confirmed_track_absorbs_offset_duplicate(self):
         tracker = SemanticObjectTracker(
             confirmation_frames=3, association_radius_m=0.5,

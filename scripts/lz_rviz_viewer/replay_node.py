@@ -44,7 +44,8 @@ from project_lz_into_bag_camera import (  # noqa: E402
 )
 from semantic_lz.semantic_fusion import (  # noqa: E402
     CLASS_COLORS_RGB, STATIC_CLASSES, OpenVocabularySegmenter, SemanticObjectTracker,
-    colorize_frame, compact_supported_clusters, filter_semantic_result, labels_at_pixels,
+    VisionProposalTracker, colorize_frame, compact_supported_clusters,
+    filter_semantic_result, labels_at_pixels,
 )
 from semantic_lz.ground_reference import (  # noqa: E402
     GROUND_REFERENCE_MODES, estimate_detection_ground,
@@ -179,7 +180,6 @@ class LandingZoneRvizReplay(Node):
             "above_ground_points": Counter(), "guided_points": Counter(),
             "height_residuals_m": {}, "semantic_observations": [],
         }
-        self.latest_vision_proposals: list[dict] = []
         self.stop = threading.Event()
         with args.config.open(encoding="utf-8") as handle:
             self.config = yaml.safe_load(handle)
@@ -281,6 +281,17 @@ class LandingZoneRvizReplay(Node):
                 image_size=int(semantic["image_size"]), device=str(semantic["device"]),
             )
         verification = semantic.get("vision_guided_lidar", {})
+        self.vision_proposal_tracker = VisionProposalTracker(
+            association_radius_m=float(
+                verification.get("vision_proposal_association_radius_m", 2.0)
+            ),
+            retention_s={
+                str(name): float(value) for name, value in verification.get(
+                    "vision_proposal_retention_s",
+                    {"person": 2.0, "cargo_box": 3.0, "vehicle": 3.0},
+                ).items()
+            },
+        )
         self.guided_lidar_tracker = SemanticObjectTracker(
             cluster_radius_m=float(verification.get("cluster_radius_m", 0.75)),
             association_radius_m=float(verification.get("association_radius_m", 1.2)),
@@ -461,7 +472,8 @@ class LandingZoneRvizReplay(Node):
             )
             proposal_label.text = (
                 f"{proposal['class_name']} | vision provisional "
-                f"| conf {proposal['confidence']:.2f}"
+                f"#{proposal['proposal_id']} | conf {proposal['confidence']:.2f} "
+                f"| obs {proposal['observations']}"
             )
             semantic_markers.append(proposal_label)
         for track in self.guided_lidar_tracker.tracks:
@@ -950,7 +962,7 @@ class LandingZoneRvizReplay(Node):
                             "class_name": class_name, "confidence": float(confidence),
                             "center": center, "covariance_xy": covariance,
                         })
-                    self.latest_vision_proposals = vision_proposals
+                    self.vision_proposal_tracker.update(vision_proposals, timestamp)
                     frame = colorize_frame(frame, filter_semantic_result(
                         semantic_result,
                         thresholds, mask_limits,
@@ -1025,7 +1037,7 @@ class LandingZoneRvizReplay(Node):
                 replay_markers = self.dynamic_markers(
                     timestamp, [zones_by_rank[rank] for rank in ranks if rank in zones_by_rank], trajectory,
                     uav, ortho_to_optical.translation, footprint, frame_number, gnss_uav,
-                    self.latest_vision_proposals,
+                    self.vision_proposal_tracker.active(timestamp),
                 )
                 if self.args.metrics_json is None:
                     self.publish_image(frame, timestamp)
