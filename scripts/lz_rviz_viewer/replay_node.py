@@ -52,6 +52,12 @@ from semantic_lz.ground_reference import (  # noqa: E402
 )
 
 FRAME_ID = "lz_world"
+SEMANTIC_DISPLAY_CORRELATED_ONLY = "camera_lidar_correlated_only"
+SEMANTIC_DISPLAY_CAMERA_AND_CORRELATED = "camera_and_lidar_correlated"
+SEMANTIC_DISPLAY_MODES = {
+    SEMANTIC_DISPLAY_CORRELATED_ONLY,
+    SEMANTIC_DISPLAY_CAMERA_AND_CORRELATED,
+}
 COLORS = {
     "safest": (0.0, 0.50, 0.0, 1.0),
     "safe": (1.0, 0.647, 0.0, 1.0),
@@ -183,6 +189,15 @@ class LandingZoneRvizReplay(Node):
         self.stop = threading.Event()
         with args.config.open(encoding="utf-8") as handle:
             self.config = yaml.safe_load(handle)
+        configured_display = self.config.get("semantic_segmentation", {}).get(
+            "display_mode", SEMANTIC_DISPLAY_CORRELATED_ONLY,
+        )
+        self.semantic_display_mode = str(args.semantic_display_mode or configured_display)
+        if self.semantic_display_mode not in SEMANTIC_DISPLAY_MODES:
+            raise ValueError(
+                f"Unknown semantic display mode {self.semantic_display_mode!r}; "
+                f"expected one of {sorted(SEMANTIC_DISPLAY_MODES)}"
+            )
         dynamic_overrides = self.config["dynamic_occupancy"]
         if args.point_stride is not None:
             dynamic_overrides["point_stride"] = args.point_stride
@@ -991,13 +1006,18 @@ class LandingZoneRvizReplay(Node):
                     ))
                 semantic_points, semantic_colors = self.guided_lidar_tracker.point_cloud()
                 active_vision_proposals = self.vision_proposal_tracker.active(timestamp)
-                if active_vision_proposals:
+                display_vision_proposals = (
+                    active_vision_proposals
+                    if self.semantic_display_mode == SEMANTIC_DISPLAY_CAMERA_AND_CORRELATED
+                    else []
+                )
+                if display_vision_proposals:
                     proposal_points = np.asarray([
-                        proposal["center"] for proposal in active_vision_proposals
+                        proposal["center"] for proposal in display_vision_proposals
                     ], dtype=np.float64)
                     proposal_colors = np.asarray([
                         CLASS_COLORS_RGB[proposal["class_name"]]
-                        for proposal in active_vision_proposals
+                        for proposal in display_vision_proposals
                     ], dtype=np.uint8)
                     semantic_points = (np.vstack((semantic_points, proposal_points))
                                        if len(semantic_points) else proposal_points)
@@ -1072,7 +1092,7 @@ class LandingZoneRvizReplay(Node):
                 replay_markers = self.dynamic_markers(
                     timestamp, [zones_by_rank[rank] for rank in ranks if rank in zones_by_rank], trajectory,
                     uav, ortho_to_optical.translation, footprint, frame_number, gnss_uav,
-                    active_vision_proposals,
+                    display_vision_proposals,
                 )
                 if self.args.metrics_json is None:
                     self.publish_image(frame, timestamp)
@@ -1144,6 +1164,8 @@ def main() -> int:
     parser.add_argument("--confirmation-hits", type=int)
     parser.add_argument("--semantic-min-height", type=float)
     parser.add_argument("--semantic-ground-reference", choices=sorted(GROUND_REFERENCE_MODES))
+    parser.add_argument("--semantic-display-mode", choices=sorted(SEMANTIC_DISPLAY_MODES),
+                        help="TAG controlling semantic layers published to RViz")
     parser.add_argument("--max-bag-seconds", type=float)
     args = parser.parse_args()
     rclpy.init()

@@ -33,6 +33,41 @@ scripts/semantic_lz/run_semantic_replay.sh \
   1.0 12
 ```
 
+## Semantic display tags
+
+The standard/default tag shows only camera detections that have correlated
+physical LiDAR support. Camera-only proposals are still tracked internally but
+are not published into RViz:
+
+```text
+camera_lidar_correlated_only
+```
+
+Run the default explicitly:
+
+```bash
+scripts/semantic_lz/run_semantic_replay.sh \
+  /media/gvb/ssd24ubuntu3/bags/Bagfilles_Feb13_2026/recovered_bag \
+  1.0 12 camera_lidar_correlated_only
+```
+
+The comparison tag shows both persistent camera-only proposals and
+camera-correlated LiDAR tracks simultaneously:
+
+```text
+camera_and_lidar_correlated
+```
+
+```bash
+scripts/semantic_lz/run_semantic_replay.sh \
+  /media/gvb/ssd24ubuntu3/bags/Bagfilles_Feb13_2026/recovered_bag \
+  1.0 12 camera_and_lidar_correlated
+```
+
+The tag can alternatively be supplied through
+`DDLZD_SEMANTIC_DISPLAY_MODE`. It affects visualization only; inference,
+tracking, covariance updates and landing-zone safety logic remain identical.
+
 The semantic model runs every third displayed frame at 1280 pixels. Mapping and
 the geometry-based safety rejection remain independent: an unrecognized obstacle
 can still invalidate a landing zone. The semantic layer is therefore descriptive

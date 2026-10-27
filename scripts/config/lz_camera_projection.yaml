@@ -144,6 +144,10 @@ output:
 
 semantic_segmentation:
   enabled: true
+  # TAG: SEMANTIC_DISPLAY_MODE
+  # Default presents only physically correlated camera+LiDAR detections.
+  # Alternative: camera_and_lidar_correlated displays camera-only proposals too.
+  display_mode: camera_lidar_correlated_only
   # TAG: GROUND_REFERENCE_ABLATION
   # Options: bayern_ground_reference, local_detection_ground_reference
   ground_reference_mode: bayern_ground_reference

@@ -6,6 +6,7 @@ default_bag_relative="bags/Bagfilles_Feb13_2026/recovered_bag"
 bag_path="${1:-/media/gvb/ssd24ubuntu/${default_bag_relative}}"
 rate="${2:-1.0}"
 fps="${3:-12.0}"
+semantic_display_mode="${4:-${DDLZD_SEMANTIC_DISPLAY_MODE:-camera_lidar_correlated_only}}"
 image="${DDLZD_RVIZ_IMAGE:-cargopack:2026}"
 optimized_poses="${DDLZD_OPTIMIZED_POSES:-${repo_root}/pcds/bag_only_strip_optimized_poses.npz}"
 
@@ -46,6 +47,7 @@ EOF
 fi
 
 printf 'Using ROS 2 bag: %s\n' "${bag_path}"
+printf 'Semantic display tag: %s\n' "${semantic_display_mode}"
 xauthority="${XAUTHORITY:-$HOME/.Xauthority}"
 xauth_args=()
 if [[ -f "${xauthority}" ]]; then
@@ -69,7 +71,8 @@ docker run --rm --name ddlzd-lz-rviz --gpus all --network host --ipc host \
     source /opt/ros/humble/setup.bash
     cp scripts/lz_rviz_viewer/lz_replay.rviz /tmp/ddlzd_lz_replay.rviz
     python3 scripts/lz_rviz_viewer/replay_node.py --bag /bag --rate '${rate}' --fps '${fps}' \
-      --optimized-poses /optimized_poses.npz &
+      --optimized-poses /optimized_poses.npz \
+      --semantic-display-mode '${semantic_display_mode}' &
     node_pid=\$!
     ros2 run image_view image_view --ros-args --remap image:=/ddlzd/camera_overlay &
     image_pid=\$!
