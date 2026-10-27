@@ -59,13 +59,20 @@ orthophoto as a ground surface. The primary independently toggleable displays ar
 - `Bayern DOP20 Orthophoto`;
 - `Bayern Static Map PCD`, loaded from
   `pcds/696_5328_cropped_by_bayernatlas_20260812084517.pcd`;
-- `Live LiDAR Map PCD (height gradient)`, loaded from
+- `Full Corrected LiDAR Scene (ground + obstacles)`, loaded from
   `pcds/lidar_mapping_accuracy/direct_corrected_pointcloud.pcd`.
 
 Use their checkboxes in RViz's Displays panel to show any layer alone or all layers
 together. The two PCDs are already in the same georeferenced coordinate frame. The
 viewer applies one shared local rendering origin to all three layers solely to avoid
 float32 precision loss at UTM coordinates.
+
+The full corrected scene is the appropriate layer when every corrected return must
+remain available: its per-scan ground-derived vertical correction is applied to the
+entire LiDAR scan before writing, so ground, people, cargo boxes, vehicles, trees,
+and other elevated returns remain in one map. `Corrected Update-Only Ground` and
+`Confirmed Scene Changes` are filtered diagnostic subsets and must not be treated as
+a complete scene replacement.
 
 The primary cloud uses a fixed Z-axis rainbow scale from `-0.5 m` to `2.2 m`
 relative to the displayed cloud origin. This gives near-ground boxes and human-height

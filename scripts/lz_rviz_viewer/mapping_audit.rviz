@@ -56,7 +56,7 @@ Visualization Manager:
       Invert Rainbow: false
       Max Color: 245; 55; 45
       Min Color: 35; 110; 235
-      Name: Live LiDAR Map PCD (height gradient)
+      Name: Full Corrected LiDAR Scene (ground + obstacles)
       Position Transformer: XYZ
       Selectable: true
       Size (Pixels): 4
