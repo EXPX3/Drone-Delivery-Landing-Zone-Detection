@@ -120,6 +120,49 @@ def write_pcd(path: Path, points: np.ndarray) -> None:
         np.savetxt(handle, points, fmt="%.6f %.6f %.6f %.0f %.6f")
 
 
+def write_static_scene_pcd(path: Path, ground_rows: np.ndarray,
+                           obstacle_rows: np.ndarray) -> None:
+    """Write fused static ground and obstacles with an explicit source layer."""
+    ground_layer = np.column_stack((ground_rows, np.zeros(len(ground_rows))))
+    obstacle_layer = np.column_stack((obstacle_rows, np.ones(len(obstacle_rows))))
+    points = np.vstack((ground_layer, obstacle_layer))
+    header = (
+        "# Static corrected scene: layer 0=ground, 1=persistent obstacle\n"
+        "VERSION 0.7\nFIELDS x y z count std_z layer\n"
+        "SIZE 4 4 4 4 4 4\nTYPE F F F F F U\nCOUNT 1 1 1 1 1 1\n"
+        f"WIDTH {len(points)}\nHEIGHT 1\nVIEWPOINT 0 0 0 1 0 0 0\n"
+        f"POINTS {len(points)}\nDATA ascii\n"
+    )
+    with path.open("w", encoding="ascii") as handle:
+        handle.write(header)
+        np.savetxt(handle, points, fmt="%.6f %.6f %.6f %.0f %.6f %.0f")
+
+
+def dynamic_exclusion_regions(path: Path, classes: set[str], margin_m: float,
+                              minimum_observations: int) -> list[dict]:
+    if not path.is_file():
+        return []
+    data = json.loads(path.read_text(encoding="utf-8"))
+    tracks = data.get("guided_lidar_tracks", data.get("lidar_tracks", []))
+    regions = []
+    for track in tracks:
+        if track.get("class_name") not in classes or not track.get("confirmed", True):
+            continue
+        observations = int(track.get("observations", minimum_observations))
+        if observations < minimum_observations:
+            continue
+        center = track.get("centroid", track.get("center"))
+        if center is None or len(center) < 2:
+            continue
+        p95 = float(track.get("empirical_radial_p95_m", track.get("p95_m", 0.0)))
+        regions.append({
+            "class_name": track["class_name"], "track_id": track.get("track_id", track.get("id")),
+            "center_xy": [float(center[0]), float(center[1])],
+            "radius_m": max(margin_m, p95 + margin_m), "observations": observations,
+        })
+    return regions
+
+
 def spectral_peaks(values: np.ndarray, times: np.ndarray) -> dict:
     if len(values) < 16:
         return {"sample_rate_hz": 0.0, "peaks_hz": []}
@@ -159,6 +202,14 @@ def main() -> int:
     parser.add_argument("--ground-gate", type=float, default=1.5)
     parser.add_argument("--max-scans", type=int, default=0)
     parser.add_argument("--disable-lidar-correction", action="store_true")
+    parser.add_argument("--static-obstacle-min-height", type=float, default=0.15)
+    parser.add_argument("--static-obstacle-max-height", type=float, default=5.0)
+    parser.add_argument("--static-minimum-hit-scans", type=int, default=3)
+    parser.add_argument("--static-minimum-time-span", type=float, default=2.0)
+    parser.add_argument("--semantic-tracks", type=Path, default=root / "pcds/semantic_experiment/local_detection_ground_reference_audit.json")
+    parser.add_argument("--dynamic-classes", default="person")
+    parser.add_argument("--dynamic-mask-margin", type=float, default=0.75)
+    parser.add_argument("--dynamic-minimum-observations", type=int, default=3)
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
 
@@ -186,6 +237,7 @@ def main() -> int:
 
     cells: dict[tuple[int, int], list[float]] = {}
     obstacle_cells: dict[tuple[int, int, int], list[float]] = {}
+    static_obstacle_cells: dict[tuple[int, int, int], list[float]] = {}
     raw_residual_sample = Reservoir(1_000_000)
     corrected_residual_sample = Reservoir(1_000_000, seed=29)
     scan_rows = []
@@ -250,6 +302,23 @@ def main() -> int:
                 item[0] += 1.0
                 item[1:] = np.asarray(item[1:]) + (center - np.asarray(item[1:])) / item[0]
 
+        elevated = ((distance <= 0.45)
+                    & (corrected_residual >= args.static_obstacle_min_height)
+                    & (corrected_residual <= args.static_obstacle_max_height))
+        elevated_points = mapped[elevated]
+        elevated_keys = np.floor(elevated_points / args.cell_size).astype(np.int64)
+        for key in np.unique(elevated_keys, axis=0):
+            mask = np.all(elevated_keys == key, axis=1)
+            center = np.median(elevated_points[mask], axis=0)
+            cell_key = tuple(int(value) for value in key)
+            item = static_obstacle_cells.get(cell_key)
+            if item is None:
+                static_obstacle_cells[cell_key] = [1.0, *center, float(timestamp), float(timestamp)]
+            else:
+                item[0] += 1.0
+                item[1:4] = np.asarray(item[1:4]) + (center - np.asarray(item[1:4])) / item[0]
+                item[5] = float(timestamp)
+
         keys = np.floor(points[:, :2] / args.cell_size).astype(np.int64)
         for key in np.unique(keys, axis=0):
             mask = np.all(keys == key, axis=1)
@@ -306,6 +375,34 @@ def main() -> int:
         for values in obstacle_cells.values() if values[0] >= 3
     ], dtype=np.float64)
     write_pcd(args.output / "change_only_obstacles.pcd", obstacle_rows)
+    minimum_span_ns = args.static_minimum_time_span * 1e9
+    persistent_rows = np.asarray([
+        [values[1], values[2], values[3], values[0], 0.0]
+        for values in static_obstacle_cells.values()
+        if values[0] >= args.static_minimum_hit_scans
+        and values[5] - values[4] >= minimum_span_ns
+    ], dtype=np.float64).reshape((-1, 5))
+    temporally_persistent_count = len(persistent_rows)
+    fused_ground_tree = cKDTree(map_rows[:, :2])
+    _, fused_ground_index = fused_ground_tree.query(persistent_rows[:, :2], workers=-1)
+    persistent_height = persistent_rows[:, 2] - map_rows[fused_ground_index, 2]
+    physically_elevated = ((persistent_height >= args.static_obstacle_min_height)
+                           & (persistent_height <= args.static_obstacle_max_height))
+    fused_ground_rejected = int(np.count_nonzero(~physically_elevated))
+    persistent_rows = persistent_rows[physically_elevated]
+    dynamic_classes = {value.strip() for value in args.dynamic_classes.split(",") if value.strip()}
+    exclusion_regions = dynamic_exclusion_regions(
+        args.semantic_tracks, dynamic_classes, args.dynamic_mask_margin,
+        args.dynamic_minimum_observations,
+    )
+    dynamic_rejected = np.zeros(len(persistent_rows), dtype=bool)
+    for region in exclusion_regions:
+        delta = persistent_rows[:, :2] - np.asarray(region["center_xy"])
+        dynamic_rejected |= np.einsum("ij,ij->i", delta, delta) <= region["radius_m"] ** 2
+    static_obstacle_rows = persistent_rows[~dynamic_rejected]
+    write_static_scene_pcd(
+        args.output / "static_corrected_scene.pcd", map_rows, static_obstacle_rows,
+    )
     with (args.output / "per_scan_metrics.csv").open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow(["timestamp_ns", "ground_points", "raw_vertical_bias_m",
@@ -329,7 +426,24 @@ def main() -> int:
         "registration": registration,
         "counts": {"scans": scans, "input_points": total_points, "ground_returns": ground_points,
                    "unique_ground_cells": len(cells), "repeated_ground_cells": len(repeated_std),
-                   "confirmed_change_voxels": len(obstacle_rows)},
+                   "confirmed_change_voxels": len(obstacle_rows),
+                   "temporally_persistent_obstacle_voxels": temporally_persistent_count,
+                   "persistent_obstacle_voxels_before_dynamic_filter": len(persistent_rows),
+                   "fused_ground_height_rejected_voxels": fused_ground_rejected,
+                   "dynamic_semantic_voxels_rejected": int(np.count_nonzero(dynamic_rejected)),
+                   "static_obstacle_voxels": len(static_obstacle_rows),
+                   "static_scene_points": len(map_rows) + len(static_obstacle_rows)},
+        "static_scene": {
+            "output": str(args.output / "static_corrected_scene.pcd"),
+            "minimum_obstacle_height_m": args.static_obstacle_min_height,
+            "maximum_obstacle_height_m": args.static_obstacle_max_height,
+            "minimum_hit_scans": args.static_minimum_hit_scans,
+            "minimum_observation_span_s": args.static_minimum_time_span,
+            "dynamic_classes_excluded": sorted(dynamic_classes),
+            "semantic_track_source": str(args.semantic_tracks),
+            "dynamic_exclusion_regions": exclusion_regions,
+            "layer_field": {"0": "corrected fused ground", "1": "persistent static obstacle"},
+        },
         "ground_accuracy_before_vertical_registration": robust_metrics(raw_residual_sample.array()),
         "ground_accuracy_after_vertical_registration": robust_metrics(corrected_residual_sample.array()),
         "layering": {

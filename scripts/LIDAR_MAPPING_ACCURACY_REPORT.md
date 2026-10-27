@@ -89,6 +89,16 @@ Outputs are generated in `pcds/lidar_mapping_accuracy/`:
   voxelization or per-cell averaging;
 - `update_only_ground_map.pcd`: ground-anchored update-only map;
 - `change_only_obstacles.pcd`: confirmed scene changes without baseline ground.
+- `static_corrected_scene.pcd`: fused corrected ground plus temporally persistent
+  elevated structure, with confirmed person tracks removed.
+
+The static scene contains 247,007 points: 170,600 fused ground cells and 76,407
+static-obstacle voxels. Elevated voxels must be observed in at least three scans over
+at least two seconds and remain `0.15-5.0 m` above the final fused ground. Rechecking
+against that final surface rejected 39,689 near-ground residual voxels. A confirmed
+person track was removed with its empirical 95% spread plus a `0.75 m` margin,
+rejecting another 233 voxels. The `layer` field identifies corrected ground (`0`)
+and persistent obstacle (`1`).
 
 Inspect all map layers interactively in RViz:
 

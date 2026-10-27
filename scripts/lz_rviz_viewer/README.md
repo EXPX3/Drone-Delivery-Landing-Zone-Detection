@@ -61,6 +61,8 @@ orthophoto as a ground surface. The primary independently toggleable displays ar
   `pcds/696_5328_cropped_by_bayernatlas_20260812084517.pcd`;
 - `Full Corrected LiDAR Scene (ground + obstacles)`, loaded from
   `pcds/lidar_mapping_accuracy/direct_corrected_pointcloud.pcd`.
+- `Static Corrected Scene (dynamic objects removed)`, loaded from
+  `pcds/lidar_mapping_accuracy/static_corrected_scene.pcd`.
 
 Use their checkboxes in RViz's Displays panel to show any layer alone or all layers
 together. The two PCDs are already in the same georeferenced coordinate frame. The
@@ -79,6 +81,13 @@ rather than absolute UTM elevation. Ground (`0 m`) is red and elevated returns
 transition through brighter warm colors toward pale yellow at `3 m`; values above
 `3 m` retain the maximum color. This prevents terrain slope from being mistaken for
 obstacle height.
+
+The static scene is the default visible PCD. It fuses corrected ground and elevated
+voxels observed in at least three scans across at least two seconds, then removes
+confirmed person tracks using their empirical 95% localization spread plus a
+`0.75 m` safety margin. Its `layer` field is `0` for fused ground and `1` for a
+persistent static obstacle. Cargo boxes and a parked vehicle remain static obstacles;
+the full corrected scene remains available as a toggle for auditing rejected data.
 
 The primary cloud uses a fixed Z-axis rainbow scale from `-0.5 m` to `2.2 m`
 relative to the displayed cloud origin. This gives near-ground boxes and human-height

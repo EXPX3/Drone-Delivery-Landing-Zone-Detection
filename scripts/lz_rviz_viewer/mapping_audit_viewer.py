@@ -176,6 +176,7 @@ class AuditPublisher(Node):
             return
         reference_fields, reference = read_pcd(args.reference)
         direct_fields, direct = read_pcd(args.direct)
+        static_fields, static_scene = read_pcd(args.static_scene)
         ground_fields, ground = read_pcd(args.ground)
         change_fields, changes = read_pcd(args.changes)
         reference_xyz = reference[:, [reference_fields.index(name) for name in ("x", "y", "z")]]
@@ -189,6 +190,7 @@ class AuditPublisher(Node):
         roi_center = np.array([args.center_x, args.center_y])
         reference = crop_xy(reference_fields, reference, roi_center, args.radius)
         direct = crop_xy(direct_fields, direct, roi_center, args.radius)
+        static_scene = crop_xy(static_fields, static_scene, roi_center, args.radius)
         ground = crop_xy(ground_fields, ground, roi_center, args.radius)
         changes = crop_xy(change_fields, changes, roi_center, args.radius)
         if len(reference) > args.maximum_reference_points:
@@ -201,12 +203,24 @@ class AuditPublisher(Node):
                 len(direct), args.maximum_direct_points, replace=False,
             )
             direct = direct[index]
+        if len(static_scene) > args.maximum_static_points:
+            index = np.random.default_rng(41).choice(
+                len(static_scene), args.maximum_static_points, replace=False,
+            )
+            static_scene = static_scene[index]
         if not len(ground):
             raise ValueError("Corrected ground map is empty inside the selected ROI")
         direct_xyz = direct[:, [direct_fields.index(name) for name in ("x", "y", "z")]]
         ground_xyz = ground[:, [ground_fields.index(name) for name in ("x", "y", "z")]]
         _, nearest_ground = cKDTree(ground_xyz[:, :2]).query(direct_xyz[:, :2], workers=-1)
         direct_height_agl = np.maximum(0.0, direct_xyz[:, 2] - ground_xyz[nearest_ground, 2])
+        static_xyz = static_scene[:, [static_fields.index(name) for name in ("x", "y", "z")]]
+        _, static_nearest_ground = cKDTree(ground_xyz[:, :2]).query(
+            static_xyz[:, :2], workers=-1,
+        )
+        static_height_agl = np.maximum(
+            0.0, static_xyz[:, 2] - ground_xyz[static_nearest_ground, 2],
+        )
         self.get_logger().info(
             "Full-scene height above corrected ground: "
             f"median {np.median(direct_height_agl):.2f} m, "
@@ -221,6 +235,7 @@ class AuditPublisher(Node):
         layers = [
             ("/ddlzd/audit/reference_ground", reference_fields, reference, None),
             ("/ddlzd/audit/direct_pointcloud", direct_fields, direct, direct_height_agl),
+            ("/ddlzd/audit/static_scene", static_fields, static_scene, static_height_agl),
             ("/ddlzd/audit/corrected_ground", ground_fields, ground, None),
             ("/ddlzd/audit/scene_changes", change_fields, changes, None),
         ]
@@ -263,6 +278,8 @@ def main() -> int:
                         default=root / "pcds/lidar_mapping_accuracy/update_only_ground_map.pcd")
     parser.add_argument("--direct", type=Path,
                         default=root / "pcds/lidar_mapping_accuracy/direct_corrected_pointcloud.pcd")
+    parser.add_argument("--static-scene", type=Path,
+                        default=root / "pcds/lidar_mapping_accuracy/static_corrected_scene.pcd")
     parser.add_argument("--changes", type=Path,
                         default=root / "pcds/lidar_mapping_accuracy/change_only_obstacles.pcd")
     parser.add_argument("--orthophoto", type=Path, default=root / "pcds/696_5328_cropped_by_bayernatlas_20260812084517_satellite_overlay_dop20.png")
@@ -271,6 +288,7 @@ def main() -> int:
     parser.add_argument("--orthophoto-z-offset", type=float, default=0.35)
     parser.add_argument("--maximum-reference-points", type=int, default=250000)
     parser.add_argument("--maximum-direct-points", type=int, default=1000000)
+    parser.add_argument("--maximum-static-points", type=int, default=500000)
     parser.add_argument("--center-x", type=float,
                         help="ROI center X; defaults to zero for standalone or grounded UTM start")
     parser.add_argument("--center-y", type=float,
