@@ -178,6 +178,148 @@ The full-bag robust centers moved 0.181, 0.306, and 0.367 m from the correspondi
 why covariance must evolve as repeated passes arrive and why a first-pass location
 should not be treated as final.
 
+## Relative Ground-Truth Registration
+
+### Coordinate model and origin
+
+The reported object positions are in the Bayern point-cloud frame:
+
+- horizontal CRS: ETRS89 / UTM zone 32N (`EPSG:25832`), in metres;
+- vertical coordinate: Bayern LiDAR orthometric/DHHN elevation, in metres;
+- RViz frame name: `lz_world`.
+
+EPSG:25832 is a projected geographic frame, not a UAV-start frame. Its conventional
+origin follows the UTM definition (zone 32 central meridian at 9 degrees east, false
+easting 500,000 m, northing measured from the equator in the northern hemisphere).
+RViz subtracts `(696423.686, 5328133.500, 0.000)` solely as a floating-point display
+origin. That subtraction does not alter stored object coordinates or covariance.
+
+The semantic localization chain is:
+
+1. YOLOE-11s-seg open-vocabulary image masks select synchronized LiDAR returns.
+2. LiDAR returns are transformed through the measured static LiDAR-to-body extrinsic.
+3. Per-return timestamps deskew each scan through the frozen strip-optimized body
+   trajectory.
+4. A 2,022-pair GNSS/TF planar registration places the trajectory in UTM; its measured
+   horizontal RMSE is 0.077 m.
+5. The fixed live-LiDAR-to-Bayern ICP correction is applied about the static-cloud
+   three-dimensional median. Its median and P75 residuals are 0.244 m and 0.318 m.
+6. Repeated accepted object centers are summarized in this map frame.
+
+Consequently, the covariance matrices reported above are empirical covariance of
+repeated **map-frame object centers**. They are not covariance matrices measured in
+the UAV body frame and subsequently rotated into UTM. A complete absolute covariance
+would additionally require time-resolved UAV pose covariance, extrinsic-calibration
+covariance, synchronization uncertainty, and their cross-correlations; those are not
+available in the bag and are not invented here.
+
+### Detection naming and label-independent correspondence
+
+This report retains the established detection-track names `Cargo 1`, `Cargo 2`,
+`Cargo 3`, and `Person 1` everywhere. The three supplied cargo coordinates are treated
+as unlabeled survey points; their order in the user's message is not used as object
+identity. The image model itself emits only the class `cargo_box`; these canonical
+numbers identify the three validated persistent geographic tracks in this report and
+must not be confused with transient runtime tracker IDs or detection order. Geometric
+assignment gives:
+
+| Detection-track name | Matched local x [m] | Matched local y [m] |
+|---|---:|---:|
+| Cargo 1 | 8.70 | 8.50 |
+| Cargo 2 | 17.27 | 8.50 |
+| Cargo 3 | 2.80 | 8.50 |
+| Person 1 | 8.70 | 2.88 |
+
+Because the three survey cargo points are treated as unlabeled, all six possible
+assignments to `Cargo 1`/`Cargo 2`/`Cargo 3` were evaluated while keeping the person
+correspondence fixed. A
+proper two-dimensional rigid transform (rotation plus translation, no reflection and
+no fitted scale) was estimated by orthogonal Procrustes/Kabsch least squares for each
+permutation. The unique best correspondence is:
+
+| Detection-track name | Matched local coordinate [m] | Reported UTM E, N [m] |
+|---|---|---|
+| Cargo 1 | `(8.70, 8.50)` | `696499.013, 5328142.584` |
+| Cargo 2 | `(17.27, 8.50)` | `696507.208, 5328145.435` |
+| Cargo 3 | `(2.80, 8.50)` | `696493.389, 5328140.570` |
+| Person 1 | `(8.70, 2.88)` | `696501.053, 5328137.188` |
+
+The best correspondence has 0.097 m positional RMSE and 0.120 m maximum residual.
+The next-best permutation has 4.199 m RMSE. The assignment is therefore determined
+by geometry rather than by the input order of the survey points. As an additional
+check, allowing an orientation-reversing reflection still leaves the next-best solution
+at 1.276 m RMSE, more than thirteen times the selected fit error.
+
+Pairwise distances provide a model-independent cross-check:
+
+| Pair | Survey [m] | Detected [m] | Difference [m] |
+|---|---:|---:|---:|
+| Cargo 3-Cargo 1 | 5.900 | 5.974 | +0.074 |
+| Cargo 1-Cargo 2 | 8.570 | 8.677 | +0.107 |
+| Cargo 3-Cargo 2 | 14.470 | 14.650 | +0.180 |
+| Cargo 1-Person 1 | 5.620 | 5.768 | +0.148 |
+| Cargo 3-Person 1 | 8.148 | 8.377 | +0.229 |
+| Cargo 2-Person 1 | 10.247 | 10.290 | +0.043 |
+
+### Derived survey-frame georeferencing
+
+The fitted transform from supplied local coordinates `q = [x, y]` to UTM coordinates
+`p = [E, N]` is:
+
+```text
+p = R q + t
+
+R = [[ 0.94181787, -0.33612363],
+     [ 0.33612363,  0.94181787]]
+
+t = [696493.7281, 5328131.6134] m
+```
+
+Thus local positive x points at UTM azimuth `+19.641 degrees` counter-clockwise from
+easting, and the supplied `(0,0)` rectangle corner is inferred as:
+
+```text
+E = 696493.728 m, N = 5328131.613 m  (EPSG:25832)
+```
+
+Residuals after this rigid fit are:
+
+| Detection-track name | dE [m] | dN [m] | Norm [m] |
+|---|---:|---:|---:|
+| Cargo 1 | +0.052 | -0.041 | 0.066 |
+| Cargo 2 | -0.072 | -0.011 | 0.073 |
+| Cargo 3 | +0.119 | -0.010 | 0.120 |
+| Person 1 | -0.099 | +0.062 | 0.117 |
+
+A diagnostic similarity fit would choose scale `1.0136` and reduce RMSE to 0.058 m,
+but it is not adopted: both coordinate systems are metric, and fitting scale would
+hide measurement/localization error rather than explain it.
+
+### Was the UAV-start corner the survey origin?
+
+No, based on the recorded data. This was checked independently using both corrected
+trajectory and GNSS rather than inferred from the drawing:
+
+| Start estimate | UTM E, N [m] | Distance from inferred `(0,0)` [m] | Position in supplied local frame [m] |
+|---|---|---:|---|
+| Corrected optimized body pose | `696496.793, 5328128.725` | 4.212 | `(1.916, -3.751)` |
+| Median GNSS during first grounded 10 s | `696496.712, 5328128.777` | 4.117 | `(1.857, -3.674)` |
+
+The two independent start estimates differ by only about 0.097 m horizontally, while
+both lie more than 4.1 m from the inferred survey origin. This separation is much
+larger than the 0.097 m rigid-fit RMSE and the 0.077 m GNSS/TF registration RMSE.
+Therefore the evidence rejects the hypothesis that the UAV body/GNSS start and the
+corner used for the supplied coordinates are the same physical point. Possible
+explanations are that the UAV started outside the rectangle, the remembered corner is
+a different corner, or the coordinates use an offset reference mark. Identifying
+which explanation is correct requires a surveyed or visually identifiable corner;
+the current data cannot distinguish them.
+
+The inferred corner is conditional on the supplied relative coordinates and detected
+object centers. It is useful for georeferencing the local layout, but it is not an
+independent absolute ground-truth measurement and therefore cannot by itself validate
+the absolute UTM accuracy of those detections.
+
 ## Relative Geometry
 
 Offsets are from the first object to the second, in UTM east/north metres:
@@ -213,3 +355,5 @@ Offsets are from the first object to the second, in UTM east/north metres:
 - Full evolution video: `pcds/semantic_experiment/semantic_localization_covariance_evolution.mp4`
 - Raw full-bag audit: `pcds/semantic_experiment/full_spread_audit.json`
 - Reproducible video renderer: `scripts/semantic_lz/render_covariance_evolution_video.py`
+- Matched Bayern-versus-local ground detection funnels:
+  `scripts/GROUND_REFERENCE_ABLATION_STUDY.md`

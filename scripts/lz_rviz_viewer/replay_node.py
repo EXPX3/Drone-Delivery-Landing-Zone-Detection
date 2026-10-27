@@ -46,6 +46,9 @@ from semantic_lz.semantic_fusion import (  # noqa: E402
     OpenVocabularySegmenter, SemanticObjectTracker, colorize_frame,
     compact_supported_clusters, filter_semantic_result, labels_at_pixels,
 )
+from semantic_lz.ground_reference import (  # noqa: E402
+    GROUND_REFERENCE_MODES, estimate_detection_ground,
+)
 
 FRAME_ID = "lz_world"
 COLORS = {
@@ -190,6 +193,10 @@ class LandingZoneRvizReplay(Node):
             self.config["semantic_segmentation"]["minimum_height_above_ground_m"] = (
                 args.semantic_min_height
             )
+        if args.semantic_ground_reference is not None:
+            self.config["semantic_segmentation"]["ground_reference_mode"] = (
+                args.semantic_ground_reference
+            )
         self.zones = load_landing_zones(args.zones, None, 0)
         full_cloud = read_ascii_pcd(args.pcd, 0)
         ground_cloud = read_ascii_pcd(args.ground_pcd, 0)
@@ -231,6 +238,9 @@ class LandingZoneRvizReplay(Node):
             clustering=dynamic.get("point_clustering"),
             hazard_clear_after_scans=int(dynamic.get("hazard_clear_after_scans", 15)),
             hazard_clearing_radius_m=float(dynamic.get("hazard_clearing_radius_m", 20.0)),
+            hazard_clear_ground_tolerance_m=float(
+                dynamic.get("hazard_clear_ground_tolerance_m", 0.12)
+            ),
         )
         self.active_zones, self.blocked_zones = self.occupancy.classified_zones()
 
@@ -708,21 +718,31 @@ class LandingZoneRvizReplay(Node):
                         selected_detection = labels[selected] - 1
                         minimum_height = float(semantic.get("minimum_height_above_ground_m", 0.12))
                         maximum_height = float(semantic.get("maximum_height_above_ground_m", 3.0))
-                        ground = np.asarray([
-                            self.terrain.height(float(point[0]), float(point[1]))
-                            for point in semantic_points
-                        ], dtype=object)
+                        ground_mode = str(semantic.get(
+                            "ground_reference_mode", "bayern_ground_reference",
+                        ))
+                        ground = np.full(len(semantic_points), np.nan, dtype=np.float64)
+                        ground_diagnostics: dict[int, dict] = {}
+                        for detection_index in range(len(semantic_result.class_names)):
+                            detection_selected = selected_detection == detection_index
+                            estimate = estimate_detection_ground(
+                                ground_mode, semantic_points[detection_selected],
+                                latest_lidar_points, self.terrain,
+                                semantic.get("local_detection_ground", {}),
+                            )
+                            ground[detection_selected] = estimate.ground_z
+                            ground_diagnostics[detection_index] = estimate.diagnostics
                         for class_name in set(names):
                             values = [
-                                float(point[2] - float(value))
+                                float(point[2] - value)
                                 for point, value, name in zip(semantic_points, ground, names)
-                                if name == class_name and value is not None
+                                if name == class_name and np.isfinite(value)
                             ]
                             self.metrics["height_residuals_m"].setdefault(
                                 str(class_name), []
                             ).extend(values)
                         height_ok = np.asarray([
-                            value is not None and minimum_height <= point[2] - float(value) <= maximum_height
+                            np.isfinite(value) and minimum_height <= point[2] - value <= maximum_height
                             for point, value in zip(semantic_points, ground)
                         ])
                         if self.args.metrics_json is not None:
@@ -745,13 +765,14 @@ class LandingZoneRvizReplay(Node):
                                         latest_lidar_points[:, :2] - center, axis=1,
                                     )
                                     local_candidates = latest_lidar_points[distance <= 1.5]
-                                    local_ground = np.asarray([
-                                        self.terrain.height(float(point[0]), float(point[1]))
-                                        for point in local_candidates
-                                    ], dtype=object)
+                                    local_estimate = estimate_detection_ground(
+                                        ground_mode, local_candidates, latest_lidar_points,
+                                        self.terrain, semantic.get("local_detection_ground", {}),
+                                    )
+                                    local_ground = local_estimate.ground_z
                                     local_ok = np.asarray([
-                                        value is not None and minimum_height
-                                        <= point[2] - float(value) <= maximum_height
+                                        np.isfinite(value) and minimum_height
+                                        <= point[2] - value <= maximum_height
                                         for point, value in zip(local_candidates, local_ground)
                                     ])
                                     raw_local = local_candidates[local_ok]
@@ -767,6 +788,7 @@ class LandingZoneRvizReplay(Node):
                                     "painted": point_distribution(painted),
                                     "height_verified": point_distribution(verified),
                                     "raw_local_elevated": point_distribution(raw_local),
+                                    "ground_reference": ground_diagnostics[detection_index],
                                 })
                         semantic_points = semantic_points[height_ok]
                         names = names[height_ok]
@@ -916,6 +938,9 @@ class LandingZoneRvizReplay(Node):
                     else:
                         report[key] = value
                 report.update({
+                    "semantic_ground_reference_mode": self.config.get(
+                        "semantic_segmentation", {}
+                    ).get("ground_reference_mode", "bayern_ground_reference"),
                     "guided_lidar_tracks": self.guided_lidar_tracker.summaries(),
                     "active_landing_zones": len(self.active_zones),
                     "blocked_landing_zones": len(self.blocked_zones),
@@ -953,6 +978,7 @@ def main() -> int:
     parser.add_argument("--rolling-radius", type=float)
     parser.add_argument("--confirmation-hits", type=int)
     parser.add_argument("--semantic-min-height", type=float)
+    parser.add_argument("--semantic-ground-reference", choices=sorted(GROUND_REFERENCE_MODES))
     parser.add_argument("--max-bag-seconds", type=float)
     args = parser.parse_args()
     rclpy.init()

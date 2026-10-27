@@ -104,7 +104,8 @@ class DynamicOccupancyMap:
                  coarse_resolution: float | None = None,
                  interest_padding_m: float = 1.0, confirmation_window_scans: int = 3,
                  clustering: dict | None = None, hazard_clear_after_scans: int = 15,
-                 hazard_clearing_radius_m: float = 20.0) -> None:
+                 hazard_clearing_radius_m: float = 20.0,
+                 hazard_clear_ground_tolerance_m: float = 0.12) -> None:
         self.resolution = float(resolution)
         self.coarse_resolution = float(coarse_resolution or resolution)
         if self.coarse_resolution < self.resolution:
@@ -116,6 +117,7 @@ class DynamicOccupancyMap:
         self.confirmation_window_scans = int(confirmation_window_scans)
         self.hazard_clear_after_scans = int(hazard_clear_after_scans)
         self.hazard_clearing_radius_m = float(hazard_clearing_radius_m)
+        self.hazard_clear_ground_tolerance_m = float(hazard_clear_ground_tolerance_m)
         self.clustering = clustering or {"enabled": False}
         self.interest_padding_m = float(interest_padding_m)
         self._zone_centers = np.asarray(
@@ -143,11 +145,13 @@ class DynamicOccupancyMap:
         self.confirmed_hazards: set[tuple[int, int, int]] = set()
         self.persistent_hazards: set[tuple[int, int, int]] = set()
         self.hazard_last_seen: dict[tuple[int, int, int], int] = {}
+        self.hazard_ground_clear_hits: dict[tuple[int, int, int], int] = {}
         self._hazard_zone_links: dict[
             tuple[int, int, int], list[tuple[int, str]]
         ] = defaultdict(list)
         self.scan_index = 0
         self.zones = zones
+        self.zones_by_rank = {int(zone["rank"]): zone for zone in zones}
         self.evidence = {int(zone["rank"]): CandidateEvidence() for zone in zones}
         self._cell_size = max(5.0, max(float(zone["radius"]) for zone in zones) + self.gps_margin_m)
         self._zone_grid: dict[tuple[int, int], list[dict]] = defaultdict(list)
@@ -258,28 +262,52 @@ class DynamicOccupancyMap:
                     evidence.margin_voxels.add(key)
                     self._hazard_zone_links[key].append((int(zone["rank"]), "margin"))
                     evidence.nearest_obstacle_m = min(evidence.nearest_obstacle_m, distance)
-        changed += self._clear_stale_hazards(sensor_origin)
+        changed += self._clear_stale_hazards(sensor_origin, hazard_source)
         return changed
 
-    def _clear_stale_hazards(self, sensor_origin: np.ndarray | None) -> int:
-        """Restore candidates only after a nearby area has remained clear."""
+    def _clear_stale_hazards(self, sensor_origin: np.ndarray | None,
+                             scan_points: np.ndarray) -> int:
+        """Restore candidates only after repeatedly observing their ground cell."""
         if sensor_origin is None or self.hazard_clear_after_scans <= 0:
             return 0
         origin = np.asarray(sensor_origin, dtype=np.float64)
-        stale = [
-            key for key in self.confirmed_hazards
-            if key not in self.persistent_hazards
-            and self.scan_index - self.hazard_last_seen.get(key, self.scan_index)
-            >= self.hazard_clear_after_scans
-            and np.linalg.norm(
-                (np.asarray(key[:2], dtype=np.float64) + 0.5) * self.resolution
-                - origin[:2]
-            ) <= self.hazard_clearing_radius_m
-        ]
+        scan_points = np.asarray(scan_points, dtype=np.float64)
+        scan_xy_keys: dict[tuple[int, int], list[float]] = defaultdict(list)
+        for point in scan_points:
+            xy_key = tuple(int(value) for value in np.floor(point[:2] / self.resolution))
+            scan_xy_keys[xy_key].append(float(point[2]))
+
+        stale = []
+        for key in self.confirmed_hazards:
+            if key in self.persistent_hazards:
+                continue
+            center_xy = (np.asarray(key[:2], dtype=np.float64) + 0.5) * self.resolution
+            if np.linalg.norm(center_xy - origin[:2]) > self.hazard_clearing_radius_m:
+                continue
+            # Missing endpoints do not prove free space. A later scan must
+            # explicitly observe the landing surface in the same XY cell.
+            if self.hazard_last_seen.get(key) == self.scan_index:
+                self.hazard_ground_clear_hits[key] = 0
+                continue
+            linked_zone_z = [
+                float(self.zones_by_rank[rank]["z"])
+                for rank, _ in self._hazard_zone_links.get(key, [])
+            ]
+            heights = scan_xy_keys.get(key[:2], [])
+            observes_ground = any(
+                abs(height - zone_z) <= self.hazard_clear_ground_tolerance_m
+                for height in heights for zone_z in linked_zone_z
+            )
+            hits = self.hazard_ground_clear_hits.get(key, 0)
+            hits = hits + 1 if observes_ground else 0
+            self.hazard_ground_clear_hits[key] = hits
+            if hits >= self.hazard_clear_after_scans:
+                stale.append(key)
         for key in stale:
             self.confirmed_hazards.remove(key)
             self.persistent_hazards.discard(key)
             self.hazard_last_seen.pop(key, None)
+            self.hazard_ground_clear_hits.pop(key, None)
             for rank, kind in self._hazard_zone_links.pop(key, []):
                 evidence = self.evidence[rank]
                 target = evidence.blocked_voxels if kind == "blocked" else evidence.margin_voxels
