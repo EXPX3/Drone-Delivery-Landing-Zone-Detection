@@ -302,17 +302,24 @@ class DynamicOccupancyTests(unittest.TestCase):
         )
         self.assertEqual(len(occupancy.classified_zones()[1]), 1)
 
-    def test_repeated_ground_returns_restore_candidate(self):
+    def test_repeated_well_covered_clear_ground_restores_candidate(self):
         occupancy = DynamicOccupancyMap(
             np.empty((0, 3)), [zone()], resolution=0.2,
             obstacle_min_height_m=0.2, min_obstacle_voxels=1,
             hazard_clear_after_scans=3, hazard_clearing_radius_m=10.0,
         )
+        sensor = np.array([0.0, 0.0, 10.0])
         obstacle = np.array([[1.0, 0.0, 10.5]])
-        occupancy.update(obstacle, np.zeros(3))
+        occupancy.update(obstacle, sensor)
         self.assertEqual(len(occupancy.classified_zones()[1]), 1)
+        clear_ground = np.array([
+            [x, y, 10.0]
+            for x in np.arange(-2.0, 2.01, 0.5)
+            for y in np.arange(-2.0, 2.01, 0.5)
+            if x * x + y * y <= 2.5 ** 2
+        ])
         for _ in range(3):
-            occupancy.update(np.array([[1.0, 0.0, 10.05]]), np.zeros(3))
+            occupancy.update(clear_ground, sensor, hazard_points=np.empty((0, 3)))
         self.assertEqual(len(occupancy.classified_zones()[1]), 0)
 
     def test_empty_scans_do_not_restore_candidate(self):
@@ -326,6 +333,28 @@ class DynamicOccupancyTests(unittest.TestCase):
             occupancy.update(np.empty((0, 3)), np.zeros(3))
         self.assertEqual(len(occupancy.classified_zones()[1]), 1)
 
+    def test_clear_evidence_waits_for_minimum_hazard_age(self):
+        occupancy = DynamicOccupancyMap(
+            np.empty((0, 3)), [zone()], resolution=0.2,
+            obstacle_min_height_m=0.2, min_obstacle_voxels=1,
+            hazard_clear_after_scans=2, hazard_clearing_radius_m=10.0,
+            clear_minimum_hazard_age_scans=5,
+        )
+        sensor = np.array([0.0, 0.0, 10.0])
+        occupancy.update(np.array([[1.0, 0.0, 10.5]]), sensor)
+        clear_ground = np.array([
+            [x, y, 10.0]
+            for x in np.arange(-2.0, 2.01, 0.5)
+            for y in np.arange(-2.0, 2.01, 0.5)
+            if x * x + y * y <= 2.5 ** 2
+        ])
+        for _ in range(4):
+            occupancy.update(clear_ground, sensor, hazard_points=np.empty((0, 3)))
+        self.assertEqual(len(occupancy.classified_zones()[1]), 1)
+        for _ in range(2):
+            occupancy.update(clear_ground, sensor, hazard_points=np.empty((0, 3)))
+        self.assertEqual(len(occupancy.classified_zones()[1]), 0)
+
     def test_stale_hazard_is_not_cleared_when_sensor_is_far_away(self):
         occupancy = DynamicOccupancyMap(
             np.empty((0, 3)), [zone()], resolution=0.2,
@@ -337,6 +366,19 @@ class DynamicOccupancyTests(unittest.TestCase):
         for _ in range(3):
             occupancy.update(np.empty((0, 3)), np.array([50.0, 50.0, 0.0]))
         self.assertEqual(len(occupancy.classified_zones()[1]), 1)
+
+    def test_dynamic_semantic_position_replaces_previous_unconfirmed_cell(self):
+        occupancy = DynamicOccupancyMap(
+            np.empty((0, 3)), [zone()], resolution=0.2,
+            obstacle_min_height_m=0.15, min_obstacle_voxels=2,
+        )
+        # The ordinary geometry path may have observed the person first.
+        occupancy.update(np.array([[1.0, 0.0, 10.5]]))
+        occupancy.update(np.array([[1.0, 0.0, 10.5]]))
+        occupancy.set_dynamic_lidar_obstacles(np.array([[1.0, 0.0, 10.5]]))
+        self.assertEqual(len(occupancy.classified_zones()[1]), 1)
+        occupancy.set_dynamic_lidar_obstacles(np.array([[8.0, 0.0, 10.5]]))
+        self.assertEqual(len(occupancy.classified_zones()[1]), 0)
 
 
 if __name__ == "__main__":

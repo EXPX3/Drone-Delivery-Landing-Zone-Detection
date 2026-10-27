@@ -43,7 +43,7 @@ from project_lz_into_bag_camera import (  # noqa: E402
     open_reader, read_pose_and_gps, require_ros, stamp_ns,
 )
 from semantic_lz.semantic_fusion import (  # noqa: E402
-    OpenVocabularySegmenter, SemanticObjectTracker, colorize_frame,
+    STATIC_CLASSES, OpenVocabularySegmenter, SemanticObjectTracker, colorize_frame,
     compact_supported_clusters, filter_semantic_result, labels_at_pixels,
 )
 from semantic_lz.ground_reference import (  # noqa: E402
@@ -229,7 +229,10 @@ class LandingZoneRvizReplay(Node):
             full_cloud, self.zones,
             resolution=float(dynamic["resolution_m"]),
             gps_margin_m=float(dynamic["gps_wind_margin_m"]),
-            obstacle_min_height_m=float(dynamic["obstacle_min_height_m"]),
+            obstacle_min_height_m=max(
+                0.0, float(dynamic["obstacle_min_height_m"])
+                - float(dynamic.get("vertical_uncertainty_margin_m", 0.0))
+            ),
             vertical_clearance_m=float(dynamic["vertical_clearance_m"]),
             min_obstacle_voxels=int(dynamic["confirmation_hits"]),
             coarse_resolution=float(dynamic["coarse_resolution_m"]),
@@ -238,8 +241,14 @@ class LandingZoneRvizReplay(Node):
             clustering=dynamic.get("point_clustering"),
             hazard_clear_after_scans=int(dynamic.get("hazard_clear_after_scans", 15)),
             hazard_clearing_radius_m=float(dynamic.get("hazard_clearing_radius_m", 20.0)),
-            hazard_clear_ground_tolerance_m=float(
-                dynamic.get("hazard_clear_ground_tolerance_m", 0.12)
+            hazard_clear_ray_margin_m=float(dynamic.get("hazard_clear_ray_margin_m", 0.30)),
+            hazard_clear_min_angle_deg=float(dynamic.get("hazard_clear_min_angle_deg", 0.15)),
+            clear_ground_tolerance_m=float(dynamic.get("clear_ground_tolerance_m", 0.12)),
+            clear_grid_resolution_m=float(dynamic.get("clear_grid_resolution_m", 0.50)),
+            clear_minimum_ground_points=int(dynamic.get("clear_minimum_ground_points", 20)),
+            clear_minimum_coverage=float(dynamic.get("clear_minimum_coverage", 0.25)),
+            clear_minimum_hazard_age_scans=int(
+                dynamic.get("clear_minimum_hazard_age_scans", 0)
             ),
         )
         self.active_zones, self.blocked_zones = self.occupancy.classified_zones()
@@ -279,6 +288,10 @@ class LandingZoneRvizReplay(Node):
             confirmation_frames=int(verification.get("confirmation_frames", 2)),
             maximum_age_frames=int(verification.get("maximum_age_frames", 90)),
             history_size=int(verification.get("history_size", 60)),
+            duplicate_merge_radius_m=float(
+                verification.get("duplicate_merge_radius_m", 1.5)
+            ),
+            static_voxel_size_m=float(verification.get("static_voxel_size_m", 0.10)),
         )
         self.cloud_pub.publish(point_cloud_message(cloud, self.origin))
         self.static_pub.publish(self.zone_markers(0))
@@ -409,7 +422,7 @@ class LandingZoneRvizReplay(Node):
             local = value - self.origin
             registration.points.append(Point(x=float(local[0]), y=float(local[1]), z=float(local[2])))
         semantic_markers: list[Marker] = []
-        for track in self.guided_lidar_tracker.confirmed_tracks():
+        for track in self.guided_lidar_tracker.tracks:
             centers = np.asarray(track.centers, dtype=np.float64)
             covariance = (np.cov(centers[:, :2], rowvar=False)
                           if len(centers) > 1 else np.eye(2) * 0.01)
@@ -483,7 +496,9 @@ class LandingZoneRvizReplay(Node):
                                               z=float(local[2] + 1.35))
             radial = np.linalg.norm(centers[:, :2] - center[:2], axis=1)
             text_marker.text = (
-                f"{track.class_name} #{track.display_id} | P95 {np.percentile(radial, 95):.2f} m\n"
+                f"{track.class_name} #{track.display_id or track.track_id} "
+                f"| {'confirmed' if track.observations >= self.guided_lidar_tracker.confirmation_frames else 'provisional'} "
+                f"| P95 {np.percentile(radial, 95):.2f} m\n"
                 f"Cov XY [m^2] [{covariance[0, 0]:.3f} {covariance[0, 1]:+.3f}; "
                 f"{covariance[1, 0]:+.3f} {covariance[1, 1]:.3f}]"
             )
@@ -626,6 +641,14 @@ class LandingZoneRvizReplay(Node):
                             or timestamp - last_occupancy_publish >= occupancy_interval_ns):
                         if self.args.metrics_json is None:
                             live_map = self.occupancy.occupied_centers(include_baseline=False)
+                            map_limit = int(self.config["dynamic_occupancy"].get(
+                                "max_visualized_map_points", 150000,
+                            ))
+                            if len(live_map) > map_limit:
+                                indices = np.linspace(
+                                    0, len(live_map) - 1, map_limit, dtype=np.int64,
+                                )
+                                live_map = live_map[indices]
                             cloud_message = point_cloud_message(live_map, self.origin)
                             ros_stamp(cloud_message, timestamp)
                             self.occupancy_cloud_pub.publish(cloud_message)
@@ -716,7 +739,15 @@ class LandingZoneRvizReplay(Node):
                         semantic_points = latest_lidar_points[selected]
                         names = np.asarray(semantic_result.class_names, dtype=object)[labels[selected] - 1]
                         selected_detection = labels[selected] - 1
-                        minimum_height = float(semantic.get("minimum_height_above_ground_m", 0.12))
+                        minimum_height = max(
+                            0.0, float(semantic.get("minimum_height_above_ground_m", 0.15))
+                            - float(semantic.get(
+                                "vertical_uncertainty_margin_m",
+                                self.config["dynamic_occupancy"].get(
+                                    "vertical_uncertainty_margin_m", 0.0,
+                                ),
+                            ))
+                        )
                         maximum_height = float(semantic.get("maximum_height_above_ground_m", 3.0))
                         ground_mode = str(semantic.get(
                             "ground_reference_mode", "bayern_ground_reference",
@@ -846,19 +877,24 @@ class LandingZoneRvizReplay(Node):
                         verification.get("maximum_mask_fraction", {}),
                     ))
                 semantic_points, semantic_colors = self.guided_lidar_tracker.point_cloud()
-                safety_age = int(semantic.get("vision_guided_lidar", {}).get(
-                    "safety_maximum_age_frames", 90,
-                ))
-                recent_tracks = [
-                    track for track in self.guided_lidar_tracker.confirmed_tracks()
-                    if frame_number + 1 - track.last_frame <= safety_age
+                current_frame = frame_number + 1
+                static_updates = [
+                    track.accumulated_points
+                    for track in self.guided_lidar_tracker.tracks
+                    if track.class_name in STATIC_CLASSES and track.last_frame == current_frame
                 ]
-                confirmed_lidar_points = (
-                    np.vstack([track.points for track in recent_tracks])
-                    if recent_tracks else np.empty((0, 3), dtype=np.float64)
-                )
-                semantic_zone_changes = self.occupancy.add_confirmed_lidar_obstacles(
-                    confirmed_lidar_points,
+                dynamic_support = [
+                    track.points for track in self.guided_lidar_tracker.tracks
+                    if track.class_name not in STATIC_CLASSES
+                ]
+                semantic_zone_changes = 0
+                if static_updates:
+                    semantic_zone_changes += self.occupancy.add_confirmed_lidar_obstacles(
+                        np.vstack(static_updates), persistent=True,
+                    )
+                semantic_zone_changes += self.occupancy.set_dynamic_lidar_obstacles(
+                    np.vstack(dynamic_support)
+                    if dynamic_support else np.empty((0, 3), dtype=np.float64)
                 )
                 if semantic_zone_changes:
                     self.active_zones, self.blocked_zones = self.occupancy.classified_zones()

@@ -105,7 +105,13 @@ class DynamicOccupancyMap:
                  interest_padding_m: float = 1.0, confirmation_window_scans: int = 3,
                  clustering: dict | None = None, hazard_clear_after_scans: int = 15,
                  hazard_clearing_radius_m: float = 20.0,
-                 hazard_clear_ground_tolerance_m: float = 0.12) -> None:
+                 hazard_clear_ray_margin_m: float = 0.30,
+                 hazard_clear_min_angle_deg: float = 0.15,
+                 clear_ground_tolerance_m: float = 0.12,
+                 clear_grid_resolution_m: float = 0.50,
+                 clear_minimum_ground_points: int = 20,
+                 clear_minimum_coverage: float = 0.25,
+                 clear_minimum_hazard_age_scans: int = 0) -> None:
         self.resolution = float(resolution)
         self.coarse_resolution = float(coarse_resolution or resolution)
         if self.coarse_resolution < self.resolution:
@@ -117,7 +123,13 @@ class DynamicOccupancyMap:
         self.confirmation_window_scans = int(confirmation_window_scans)
         self.hazard_clear_after_scans = int(hazard_clear_after_scans)
         self.hazard_clearing_radius_m = float(hazard_clearing_radius_m)
-        self.hazard_clear_ground_tolerance_m = float(hazard_clear_ground_tolerance_m)
+        self.hazard_clear_ray_margin_m = float(hazard_clear_ray_margin_m)
+        self.hazard_clear_min_angle_rad = np.deg2rad(float(hazard_clear_min_angle_deg))
+        self.clear_ground_tolerance_m = float(clear_ground_tolerance_m)
+        self.clear_grid_resolution_m = float(clear_grid_resolution_m)
+        self.clear_minimum_ground_points = int(clear_minimum_ground_points)
+        self.clear_minimum_coverage = float(clear_minimum_coverage)
+        self.clear_minimum_hazard_age_scans = int(clear_minimum_hazard_age_scans)
         self.clustering = clustering or {"enabled": False}
         self.interest_padding_m = float(interest_padding_m)
         self._zone_centers = np.asarray(
@@ -143,9 +155,13 @@ class DynamicOccupancyMap:
         self.coarse_live_hits: dict[tuple[int, int, int], int] = {}
         self.hazard_observations: dict[tuple[int, int, int], list[int]] = defaultdict(list)
         self.confirmed_hazards: set[tuple[int, int, int]] = set()
+        self.geometric_hazards: set[tuple[int, int, int]] = set()
         self.persistent_hazards: set[tuple[int, int, int]] = set()
+        self.dynamic_semantic_hazards: set[tuple[int, int, int]] = set()
         self.hazard_last_seen: dict[tuple[int, int, int], int] = {}
-        self.hazard_ground_clear_hits: dict[tuple[int, int, int], int] = {}
+        self.hazard_first_seen: dict[tuple[int, int, int], int] = {}
+        self.hazard_free_hits: dict[tuple[int, int, int], int] = {}
+        self.zone_clear_hits: dict[int, int] = defaultdict(int)
         self._hazard_zone_links: dict[
             tuple[int, int, int], list[tuple[int, str]]
         ] = defaultdict(list)
@@ -242,6 +258,8 @@ class DynamicOccupancyMap:
             if len(nearby_scans) < required_hits:
                 continue
             self.confirmed_hazards.add(key)
+            self.geometric_hazards.add(key)
+            self.hazard_first_seen.setdefault(key, self.scan_index)
             self.hazard_last_seen[key] = self.scan_index
             changed += 1
             grid_key = (int(np.floor(center[0] / self._cell_size)),
@@ -262,59 +280,87 @@ class DynamicOccupancyMap:
                     evidence.margin_voxels.add(key)
                     self._hazard_zone_links[key].append((int(zone["rank"]), "margin"))
                     evidence.nearest_obstacle_m = min(evidence.nearest_obstacle_m, distance)
-        changed += self._clear_stale_hazards(sensor_origin, hazard_source)
+        changed += self._clear_stale_hazards(sensor_origin, points)
         return changed
 
     def _clear_stale_hazards(self, sensor_origin: np.ndarray | None,
                              scan_points: np.ndarray) -> int:
-        """Restore candidates only after repeatedly observing their ground cell."""
+        """Restore a footprint only after repeated, well-covered clear-ground scans."""
         if sensor_origin is None or self.hazard_clear_after_scans <= 0:
             return 0
         origin = np.asarray(sensor_origin, dtype=np.float64)
         scan_points = np.asarray(scan_points, dtype=np.float64)
-        scan_xy_keys: dict[tuple[int, int], list[float]] = defaultdict(list)
-        for point in scan_points:
-            xy_key = tuple(int(value) for value in np.floor(point[:2] / self.resolution))
-            scan_xy_keys[xy_key].append(float(point[2]))
+        changed = 0
+        for rank, evidence in self.evidence.items():
+            if not evidence.blocked_voxels:
+                self.zone_clear_hits[rank] = 0
+                continue
+            if any(
+                self.scan_index - self.hazard_first_seen.get(key, self.scan_index)
+                < self.clear_minimum_hazard_age_scans
+                for key in evidence.blocked_voxels
+            ):
+                self.zone_clear_hits[rank] = 0
+                continue
+            zone = self.zones_by_rank[rank]
+            center = np.array([float(zone["x"]), float(zone["y"])])
+            if np.linalg.norm(center - origin[:2]) > self.hazard_clearing_radius_m:
+                continue
+            radius = float(zone["radius"])
+            distance = np.linalg.norm(scan_points[:, :2] - center, axis=1)
+            footprint = scan_points[distance <= radius]
+            if len(footprint) < self.clear_minimum_ground_points:
+                self.zone_clear_hits[rank] = 0
+                continue
+            dz = footprint[:, 2] - float(zone["z"])
+            elevated = ((dz >= self.obstacle_min_height_m)
+                        & (dz <= self.vertical_clearance_m))
+            ground = footprint[np.abs(dz) <= self.clear_ground_tolerance_m]
+            grid = np.floor(
+                (ground[:, :2] - (center - radius)) / self.clear_grid_resolution_m
+            ).astype(np.int64)
+            observed_cells = len(np.unique(grid, axis=0)) if len(grid) else 0
+            expected_cells = max(1, int(np.pi * radius * radius
+                                        / self.clear_grid_resolution_m ** 2))
+            coverage = observed_cells / expected_cells
+            clear = not np.any(elevated) and coverage >= self.clear_minimum_coverage
+            self.zone_clear_hits[rank] = self.zone_clear_hits.get(rank, 0) + 1 if clear else 0
+            if self.zone_clear_hits[rank] < self.hazard_clear_after_scans:
+                continue
+            # Semantic static objects remain authoritative; only geometric or
+            # superseded dynamic evidence may be cleared by free-space scans.
+            removable = {
+                key for key in evidence.blocked_voxels
+                if key not in self.persistent_hazards
+            }
+            if not removable:
+                self.zone_clear_hits[rank] = 0
+                continue
+            for key in removable:
+                evidence.blocked_voxels.discard(key)
+                links = self._hazard_zone_links.get(key, [])
+                self._hazard_zone_links[key] = [link for link in links if link[0] != rank]
+            if not evidence.blocked_voxels and not evidence.margin_voxels:
+                evidence.nearest_obstacle_m = np.inf
+            self.zone_clear_hits[rank] = 0
+            changed += 1
+        return changed
 
-        stale = []
-        for key in self.confirmed_hazards:
-            if key in self.persistent_hazards:
-                continue
-            center_xy = (np.asarray(key[:2], dtype=np.float64) + 0.5) * self.resolution
-            if np.linalg.norm(center_xy - origin[:2]) > self.hazard_clearing_radius_m:
-                continue
-            # Missing endpoints do not prove free space. A later scan must
-            # explicitly observe the landing surface in the same XY cell.
-            if self.hazard_last_seen.get(key) == self.scan_index:
-                self.hazard_ground_clear_hits[key] = 0
-                continue
-            linked_zone_z = [
-                float(self.zones_by_rank[rank]["z"])
-                for rank, _ in self._hazard_zone_links.get(key, [])
-            ]
-            heights = scan_xy_keys.get(key[:2], [])
-            observes_ground = any(
-                abs(height - zone_z) <= self.hazard_clear_ground_tolerance_m
-                for height in heights for zone_z in linked_zone_z
-            )
-            hits = self.hazard_ground_clear_hits.get(key, 0)
-            hits = hits + 1 if observes_ground else 0
-            self.hazard_ground_clear_hits[key] = hits
-            if hits >= self.hazard_clear_after_scans:
-                stale.append(key)
-        for key in stale:
-            self.confirmed_hazards.remove(key)
-            self.persistent_hazards.discard(key)
-            self.hazard_last_seen.pop(key, None)
-            self.hazard_ground_clear_hits.pop(key, None)
-            for rank, kind in self._hazard_zone_links.pop(key, []):
-                evidence = self.evidence[rank]
-                target = evidence.blocked_voxels if kind == "blocked" else evidence.margin_voxels
-                target.discard(key)
-                if not evidence.blocked_voxels and not evidence.margin_voxels:
-                    evidence.nearest_obstacle_m = np.inf
-        return len(stale)
+    def _remove_hazard(self, key: tuple[int, int, int]) -> None:
+        self.confirmed_hazards.discard(key)
+        self.geometric_hazards.discard(key)
+        self.persistent_hazards.discard(key)
+        self.dynamic_semantic_hazards.discard(key)
+        self.hazard_last_seen.pop(key, None)
+        self.hazard_first_seen.pop(key, None)
+        self.hazard_free_hits.pop(key, None)
+        self.live_hits.pop(key, None)
+        for rank, kind in self._hazard_zone_links.pop(key, []):
+            evidence = self.evidence[rank]
+            target = evidence.blocked_voxels if kind == "blocked" else evidence.margin_voxels
+            target.discard(key)
+            if not evidence.blocked_voxels and not evidence.margin_voxels:
+                evidence.nearest_obstacle_m = np.inf
 
     def _clustered_hazard_points(self, points: np.ndarray,
                                  sensor_origin: np.ndarray | None) -> tuple[np.ndarray, np.ndarray]:
@@ -445,12 +491,16 @@ class DynamicOccupancyMap:
                 active.append(zone)
         return active, blocked
 
-    def add_confirmed_lidar_obstacles(self, points: np.ndarray) -> int:
+    def add_confirmed_lidar_obstacles(self, points: np.ndarray,
+                                      persistent: bool = False) -> int:
         """Refresh obstacles confirmed jointly by semantics and physical LiDAR."""
         changed = 0
         for point in np.asarray(points, dtype=np.float64):
             key = tuple(int(value) for value in np.floor(point / self.resolution))
             self.confirmed_hazards.add(key)
+            self.hazard_first_seen.setdefault(key, self.scan_index)
+            if persistent:
+                self.persistent_hazards.add(key)
             self.hazard_last_seen[key] = self.scan_index
             grid_key = (int(np.floor(point[0] / self._cell_size)),
                         int(np.floor(point[1] / self._cell_size)))
@@ -469,9 +519,30 @@ class DynamicOccupancyMap:
                 if target is not None and key not in target:
                     target.add(key)
                     kind = "blocked" if target is evidence.blocked_voxels else "margin"
-                    self._hazard_zone_links[key].append((int(zone["rank"]), kind))
+                    link = (int(zone["rank"]), kind)
+                    if link not in self._hazard_zone_links[key]:
+                        self._hazard_zone_links[key].append(link)
                     evidence.nearest_obstacle_m = min(evidence.nearest_obstacle_m, distance)
                     changed += 1
+        return changed
+
+    def set_dynamic_lidar_obstacles(self, points: np.ndarray) -> int:
+        """Replace dynamic semantic support, removing superseded object positions."""
+        values = np.asarray(points, dtype=np.float64)
+        current = {
+            tuple(int(value) for value in np.floor(point / self.resolution))
+            for point in values
+        }
+        changed = 0
+        for key in self.dynamic_semantic_hazards - current:
+            if key not in self.persistent_hazards:
+                self._remove_hazard(key)
+                changed += 1
+        self.dynamic_semantic_hazards = current
+        before = {key: key in self.confirmed_hazards for key in current}
+        changed += self.add_confirmed_lidar_obstacles(values, persistent=False)
+        self.dynamic_semantic_hazards.update(current)
+        changed += sum(1 for key, existed in before.items() if not existed)
         return changed
 
     def occupied_centers(self, include_baseline: bool = True, confirmed_only: bool = True) -> np.ndarray:

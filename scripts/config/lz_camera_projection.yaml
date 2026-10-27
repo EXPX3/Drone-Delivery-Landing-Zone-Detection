@@ -31,12 +31,18 @@ dynamic_occupancy:
   interest_padding_m: 1.0
   confirmation_hits: 2
   confirmation_window_scans: 3
-  # Disabled for the safety demonstration: this endpoint-only mapper cannot
-  # provide trustworthy ray-miss evidence that an obstacle has disappeared.
-  # Confirmed occupied cells therefore remain occupied for the complete run.
-  hazard_clear_after_scans: 0
+  # Restore a rejected footprint only after repeated scans densely observe its
+  # ground surface with no elevated cluster. Absence of returns is not free.
+  hazard_clear_after_scans: 10
   hazard_clearing_radius_m: 20.0
-  hazard_clear_ground_tolerance_m: 0.12
+  clear_ground_tolerance_m: 0.12
+  clear_grid_resolution_m: 0.50
+  clear_minimum_ground_points: 20
+  clear_minimum_coverage: 0.25
+  # The first reliable cargo semantic support in this bag appears roughly 40 s
+  # after the earliest geometric block. At 10 Hz, 450 scans allow classification
+  # before reversible free-space evidence can reopen an unclassified footprint.
+  clear_minimum_hazard_age_scans: 450
   maximum_lidar_range_m: 80.0
   # Safety revalidation is local below the UAV; the full map is still fused and
   # displayed independently.
@@ -48,12 +54,16 @@ dynamic_occupancy:
   publish_hz: 5.0
   zone_publish_hz: 10.0
   max_visualized_voxels: 20000
+  # RViz transport cap only; the internal occupancy state remains complete.
+  max_visualized_map_points: 150000
   # Reuse the risk model's wind/GNSS margin. Confirmed occupancy inside a zone
   # blocks it; occupancy inside this outer margin downgrades it to risky.
   gps_wind_margin_m: 2.0
-  # Cargo 2 rises only about 0.145 m above its candidate surface. The 0.10 m
-  # gate retains it while cluster and temporal tests reject isolated map noise.
-  obstacle_min_height_m: 0.10
+  # Mission requirement: reject obstacles at least 0.15 m above local ground.
+  # The measured map vertical RMSE is 0.058 m, so a one-sigma margin prevents
+  # a true 0.15 m obstacle from becoming a false negative after registration.
+  obstacle_min_height_m: 0.15
+  vertical_uncertainty_margin_m: 0.06
   vertical_clearance_m: 5.0
   point_clustering:
     enabled: true
@@ -143,7 +153,8 @@ semantic_segmentation:
   inference_stride: 3
   maximum_lidar_age_s: 0.15
   # Reject terrain returns that project through an object mask.
-  minimum_height_above_ground_m: 0.10
+  minimum_height_above_ground_m: 0.15
+  vertical_uncertainty_margin_m: 0.06
   maximum_height_above_ground_m: 5.0
   vision_guided_lidar:
     # Vision selects a region to inspect but cannot block a zone by itself.
@@ -174,7 +185,13 @@ semantic_segmentation:
     confirmation_frames: 3
     cluster_radius_m: 0.75
     association_radius_m: 0.90
-    maximum_age_frames: 0
+    # Duplicate tracks from projection error merge well below the measured
+    # 5.9 m minimum spacing between distinct cargo boxes.
+    duplicate_merge_radius_m: 1.50
+    static_voxel_size_m: 0.10
+    # Applies to dynamic classes such as people. Cargo and vehicles persist and
+    # accumulate support; dynamic tracks retain only their current point set.
+    maximum_age_frames: 30
     safety_maximum_age_frames: 90
     history_size: 60
 

@@ -17,6 +17,7 @@ CLASS_COLORS_BGR = {
     "vehicle": (255, 96, 0),
 }
 CLASS_COLORS_RGB = {name: color[::-1] for name, color in CLASS_COLORS_BGR.items()}
+STATIC_CLASSES = frozenset({"cargo_box", "vehicle"})
 
 
 def canonical_class(prompt: str) -> str:
@@ -99,10 +100,13 @@ class SemanticObjectTrack:
     confidence: float = 0.0
     centers: list[np.ndarray] | None = None
     display_id: int | None = None
+    accumulated_points: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         if self.centers is None:
             self.centers = [self.centroid.copy()]
+        if self.accumulated_points is None:
+            self.accumulated_points = self.points.copy()
 
 
 class SemanticObjectTracker:
@@ -110,13 +114,17 @@ class SemanticObjectTracker:
 
     def __init__(self, cluster_radius_m: float = 0.75, association_radius_m: float = 1.2,
                  confirmation_frames: int = 3, smoothing: float = 0.35,
-                 maximum_age_frames: int = 90, history_size: int = 60) -> None:
+                 maximum_age_frames: int = 90, history_size: int = 60,
+                 duplicate_merge_radius_m: float = 1.5,
+                 static_voxel_size_m: float = 0.10) -> None:
         self.cluster_radius_m = float(cluster_radius_m)
         self.association_radius_m = float(association_radius_m)
         self.confirmation_frames = int(confirmation_frames)
         self.smoothing = float(smoothing)
         self.maximum_age_frames = int(maximum_age_frames)
         self.history_size = int(history_size)
+        self.duplicate_merge_radius_m = float(duplicate_merge_radius_m)
+        self.static_voxel_size_m = float(static_voxel_size_m)
         self.tracks: list[SemanticObjectTrack] = []
         self._next_id = 1
         self._next_display_id: dict[str, int] = {}
@@ -179,6 +187,12 @@ class SemanticObjectTracker:
                 track.confidence = max(track.confidence, cluster_confidence)
                 track.centers.append(center.copy())
                 track.centers = track.centers[-self.history_size:]
+                if class_name in STATIC_CLASSES:
+                    track.accumulated_points = self._voxel_union(
+                        track.accumulated_points, cluster,
+                    )
+                else:
+                    track.accumulated_points = cluster.copy()
                 self._confirm_display_id(track)
                 used_tracks.add(index)
             else:
@@ -190,14 +204,56 @@ class SemanticObjectTracker:
                 self.tracks.append(track)
                 used_tracks.add(len(self.tracks) - 1)
                 self._next_id += 1
+        self._merge_duplicate_tracks()
         self.expire(frame_index)
+
+    def _voxel_union(self, first: np.ndarray, second: np.ndarray) -> np.ndarray:
+        values = np.vstack((np.asarray(first), np.asarray(second)))
+        keys = np.floor(values / self.static_voxel_size_m).astype(np.int64)
+        _, indices = np.unique(keys, axis=0, return_index=True)
+        return values[np.sort(indices)]
+
+    def _merge_duplicate_tracks(self) -> None:
+        """Fuse same-object tracks created by camera/LiDAR projection jitter."""
+        changed = True
+        while changed:
+            changed = False
+            for first_index, first in enumerate(self.tracks):
+                for second_index in range(first_index + 1, len(self.tracks)):
+                    second = self.tracks[second_index]
+                    if first.class_name != second.class_name:
+                        continue
+                    if np.linalg.norm(first.centroid[:2] - second.centroid[:2]) > self.duplicate_merge_radius_m:
+                        continue
+                    keep, merge = ((first, second) if first.track_id < second.track_id
+                                   else (second, first))
+                    combined = np.vstack((keep.centers, merge.centers))[-self.history_size:]
+                    keep.centers = [value.copy() for value in combined]
+                    keep.centroid = np.median(combined, axis=0)
+                    keep.observations += merge.observations
+                    if merge.last_frame >= keep.last_frame:
+                        keep.points = merge.points.copy()
+                    keep.last_frame = max(keep.last_frame, merge.last_frame)
+                    keep.confidence = max(keep.confidence, merge.confidence)
+                    keep.accumulated_points = self._voxel_union(
+                        keep.accumulated_points, merge.accumulated_points,
+                    )
+                    keep.display_id = keep.display_id or merge.display_id
+                    self._confirm_display_id(keep)
+                    self.tracks = [track for track in self.tracks if track is not merge]
+                    changed = True
+                    break
+                if changed:
+                    break
 
     def expire(self, frame_index: int) -> None:
         if frame_index <= 0 or self.maximum_age_frames <= 0:
             return
         self.tracks = [
             track for track in self.tracks
-            if frame_index - track.last_frame <= self.maximum_age_frames
+            if (track.class_name in STATIC_CLASSES
+                and track.observations >= self.confirmation_frames)
+            or frame_index - track.last_frame <= self.maximum_age_frames
         ]
 
     @staticmethod
@@ -214,12 +270,14 @@ class SemanticObjectTracker:
                 if track.observations >= self.confirmation_frames]
 
     def point_cloud(self) -> tuple[np.ndarray, np.ndarray]:
-        confirmed = self.confirmed_tracks()
-        if not confirmed:
+        visible = self.tracks
+        if not visible:
             return np.empty((0, 3), dtype=np.float64), np.empty((0, 3), dtype=np.uint8)
         clouds, colors = [], []
-        for track in confirmed:
-            points = np.vstack((track.points, track.centroid[None, :]))
+        for track in visible:
+            source = (track.accumulated_points if track.class_name in STATIC_CLASSES
+                      else track.points)
+            points = np.vstack((source, track.centroid[None, :]))
             clouds.append(points)
             color = (np.asarray(CLASS_COLORS_RGB["cargo_box"], dtype=np.uint8)
                      if track.class_name == "cargo_box" else self.track_color(track))
@@ -238,6 +296,7 @@ class SemanticObjectTracker:
                 "track_id": track.track_id,
                 "display_id": track.display_id,
                 "class_name": track.class_name,
+                "motion_model": ("static" if track.class_name in STATIC_CLASSES else "dynamic"),
                 "observations": track.observations,
                 "confirmed": track.observations >= self.confirmation_frames,
                 "centroid": track.centroid.tolist(),

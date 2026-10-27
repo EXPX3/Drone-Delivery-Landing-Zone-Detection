@@ -75,13 +75,13 @@ class SemanticFusionTests(unittest.TestCase):
         tracker.update(np.array([[0.0, 0.0, 0.5], [0.1, 0.0, 0.5]]), names)
         tracker.update(np.array([[0.25, 0.0, 0.5], [0.35, 0.0, 0.5]]), names)
         points, _ = tracker.point_cloud()
-        self.assertEqual(len(points), 0)
+        self.assertGreater(len(points), 0)
         latest = np.array([[0.45, 0.0, 0.5], [0.55, 0.0, 0.5]])
         tracker.update(latest, names)
         points, colors = tracker.point_cloud()
         self.assertEqual(len(tracker.tracks), 1)
-        self.assertEqual(len(points), 3)
-        self.assertTrue(np.all(points[:2, 0] >= 0.45))
+        self.assertGreaterEqual(len(points), 5)
+        self.assertTrue(np.all(tracker.tracks[0].points[:, 0] >= 0.45))
         self.assertEqual(colors[0].tolist(), [255, 255, 0])
 
     def test_compact_support_rejects_broad_mask_leakage(self):
@@ -94,16 +94,18 @@ class SemanticFusionTests(unittest.TestCase):
         self.assertEqual(len(accepted), 1)
         self.assertEqual(len(accepted[0]), 3)
 
-    def test_tracker_expires_stale_object_and_keeps_boxes_bright_yellow(self):
+    def test_tracker_retains_static_objects_and_keeps_boxes_bright_yellow(self):
         tracker = SemanticObjectTracker(
-            confirmation_frames=1, maximum_age_frames=2, association_radius_m=0.5,
+            confirmation_frames=2, maximum_age_frames=2, association_radius_m=0.5,
         )
         tracker.update(np.array([[0.0, 0.0, 0.5]]), np.array(["cargo_box"]), frame_index=1)
-        tracker.update(np.array([[2.0, 0.0, 0.5]]), np.array(["cargo_box"]), frame_index=2)
+        tracker.update(np.array([[0.0, 0.0, 0.5]]), np.array(["cargo_box"]), frame_index=2)
+        tracker.update(np.array([[2.0, 0.0, 0.5]]), np.array(["cargo_box"]), frame_index=3)
+        tracker.update(np.array([[2.0, 0.0, 0.5]]), np.array(["cargo_box"]), frame_index=4)
         _, colors = tracker.point_cloud()
         self.assertTrue(np.all(colors == np.array([255, 255, 0])))
-        tracker.expire(4)
-        self.assertEqual([track.track_id for track in tracker.tracks], [2])
+        tracker.expire(7)
+        self.assertEqual([track.track_id for track in tracker.tracks], [1, 2])
 
     def test_only_confirmed_tracks_consume_display_ids(self):
         tracker = SemanticObjectTracker(
@@ -118,6 +120,35 @@ class SemanticFusionTests(unittest.TestCase):
         self.assertEqual([track.track_id for track in tracker.confirmed_tracks()], [2, 3])
         self.assertEqual([track.display_id for track in tracker.confirmed_tracks()], [1, 2])
         self.assertIsNone(tracker.tracks[0].display_id)
+
+    def test_projection_duplicate_tracks_merge_without_merging_distinct_boxes(self):
+        tracker = SemanticObjectTracker(
+            confirmation_frames=1, association_radius_m=0.4,
+            duplicate_merge_radius_m=1.5, maximum_age_frames=10,
+        )
+        cargo = np.array(["cargo_box"], dtype=object)
+        tracker.update(np.array([[0.0, 0.0, 0.5]]), cargo, frame_index=1)
+        tracker.update(np.array([[1.1, 0.0, 0.5]]), cargo, frame_index=2)
+        tracker.update(np.array([[5.9, 0.0, 0.5]]), cargo, frame_index=3)
+        self.assertEqual(len(tracker.tracks), 2)
+        self.assertEqual(tracker.tracks[0].observations, 2)
+
+    def test_static_support_accumulates_while_dynamic_support_moves(self):
+        tracker = SemanticObjectTracker(
+            confirmation_frames=1, association_radius_m=1.0,
+            duplicate_merge_radius_m=1.5, maximum_age_frames=2,
+            static_voxel_size_m=0.05,
+        )
+        tracker.update(np.array([[0.0, 0.0, 0.5]]), np.array(["cargo_box"]), 1)
+        tracker.update(np.array([[0.2, 0.0, 0.5]]), np.array(["cargo_box"]), 2)
+        cargo = tracker.tracks[0]
+        self.assertEqual(len(cargo.accumulated_points), 2)
+        tracker.update(np.array([[2.0, 0.0, 1.7]]), np.array(["person"]), 3)
+        tracker.update(np.array([[2.5, 0.0, 1.7]]), np.array(["person"]), 4)
+        person = next(track for track in tracker.tracks if track.class_name == "person")
+        self.assertEqual(person.points.tolist(), [[2.5, 0.0, 1.7]])
+        tracker.expire(7)
+        self.assertEqual([track.class_name for track in tracker.tracks], ["cargo_box"])
 
 
 if __name__ == "__main__":

@@ -68,11 +68,21 @@ The ordinary LiDAR occupancy pipeline remains authoritative everywhere. Current
 track state is also published as JSON on `/ddlzd/semantic_object_uncertainty` for
 downstream consumers.
 
-Confirmed LiDAR hazards are monotonic during a replay: once physical returns block
-a landing footprint, that footprint remains blocked for the run. Automatic decay is
-disabled because endpoint-only scans do not provide sufficient ray-miss evidence to
-prove that a box has disappeared. A future dynamic-clearing mode must use explicit
-ray-based free-space integration rather than absence of repeated endpoints.
+Landing-zone safety uses an uncertainty-adjusted 0.15 m physical-height requirement.
+A new geometric obstacle blocks immediately after compact temporal confirmation.
+Reopening is deliberately harder: the obstacle must first survive a 450-scan
+classification window, then ten consecutive scans must cover at least 25% of the
+complete landing footprint with ground returns while observing no elevated cluster.
+Missing returns never count as free space. Confirmed cargo and vehicles are treated
+as static, accumulate voxelized support, and remain authoritative. Person tracks are
+dynamic: only their current cluster enters semantic occupancy and their former
+semantic position is removed when the track moves or expires.
+
+Physically supported object tracks are rendered in RViz immediately as `provisional`.
+After three observations they become `confirmed`. Same-class tracks within 1.5 m are
+merged to suppress duplicate camera/LiDAR projections; this remains well below the
+measured 5.9 m minimum spacing between the three cargo boxes. Every update recomputes
+the empirical East/North covariance contours and normalized Gaussian surface.
 
 ## Ground-reference tags
 
