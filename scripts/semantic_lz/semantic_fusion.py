@@ -116,6 +116,7 @@ class SemanticObjectTracker:
                  confirmation_frames: int = 3, smoothing: float = 0.35,
                  maximum_age_frames: int = 90, history_size: int = 60,
                  duplicate_merge_radius_m: float = 1.5,
+                 confirmed_duplicate_merge_radius_m: float = 2.5,
                  static_voxel_size_m: float = 0.10) -> None:
         self.cluster_radius_m = float(cluster_radius_m)
         self.association_radius_m = float(association_radius_m)
@@ -124,6 +125,11 @@ class SemanticObjectTracker:
         self.maximum_age_frames = int(maximum_age_frames)
         self.history_size = int(history_size)
         self.duplicate_merge_radius_m = float(duplicate_merge_radius_m)
+        self.confirmed_duplicate_merge_radius_m = float(
+            confirmed_duplicate_merge_radius_m
+        )
+        if self.confirmed_duplicate_merge_radius_m < self.duplicate_merge_radius_m:
+            raise ValueError("Confirmed duplicate merge radius cannot be smaller")
         self.static_voxel_size_m = float(static_voxel_size_m)
         self.tracks: list[SemanticObjectTrack] = []
         self._next_id = 1
@@ -223,7 +229,11 @@ class SemanticObjectTracker:
                     second = self.tracks[second_index]
                     if first.class_name != second.class_name:
                         continue
-                    if np.linalg.norm(first.centroid[:2] - second.centroid[:2]) > self.duplicate_merge_radius_m:
+                    confirmed = (first.observations >= self.confirmation_frames
+                                 or second.observations >= self.confirmation_frames)
+                    merge_radius = (self.confirmed_duplicate_merge_radius_m if confirmed
+                                    else self.duplicate_merge_radius_m)
+                    if np.linalg.norm(first.centroid[:2] - second.centroid[:2]) > merge_radius:
                         continue
                     keep, merge = ((first, second) if first.track_id < second.track_id
                                    else (second, first))

@@ -13,7 +13,8 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
 
 from lz_rviz_viewer.dynamic_occupancy import (
-    apply_centered_transform, DynamicOccupancyMap, interpolate_gps, pointcloud2_xyz,
+    apply_centered_transform, DynamicOccupancyMap, fit_local_ground_plane,
+    interpolate_gps, pointcloud2_xyz,
 )
 from lz_rviz_viewer.validated_pose_replay import (
     timed_xyz, transform_timed_points, ValidatedPoseReplay,
@@ -25,6 +26,49 @@ def zone(rank=1, x=0.0, y=0.0, z=10.0, radius=2.5, category="safest"):
 
 
 class DynamicOccupancyTests(unittest.TestCase):
+    def test_local_ground_plane_recovers_slope_with_elevated_outliers(self):
+        xy = np.array([
+            [x, y] for x in np.linspace(-4.0, 4.0, 17)
+            for y in np.linspace(-4.0, 4.0, 17)
+        ])
+        ground = np.column_stack((xy, 10.0 + 0.03 * xy[:, 0] - 0.02 * xy[:, 1]))
+        obstacles = np.array([[0.0, 0.0, 10.8], [1.0, 1.0, 11.0]])
+        plane = fit_local_ground_plane(
+            np.vstack((ground, obstacles)), np.zeros(2),
+            {"radius_m": 5.0, "minimum_inliers": 100,
+             "ransac_distance_threshold_m": 0.03, "ransac_iterations": 32},
+        )
+        self.assertIsNotNone(plane)
+        np.testing.assert_allclose(plane.height([[2.0, -1.0]]), [10.08], atol=1e-3)
+
+    def test_local_plane_uses_true_height_threshold_and_ignores_layered_ground(self):
+        config = {
+            "enabled": True, "radius_m": 5.0, "minimum_inliers": 20,
+            "ransac_distance_threshold_m": 0.08, "ransac_iterations": 32,
+        }
+        occupancy = DynamicOccupancyMap(
+            np.empty((0, 3)), [zone()], resolution=0.2,
+            obstacle_min_height_m=0.15, min_obstacle_voxels=1,
+            local_ground=config,
+        )
+        ground = np.array([
+            [x, y, 10.0 + 0.02 * x] for x in np.linspace(-2.0, 2.0, 9)
+            for y in np.linspace(-2.0, 2.0, 9)
+        ])
+        occupancy.update(np.vstack((ground, [[0.0, 0.0, 10.12]])), np.zeros(3))
+        self.assertEqual(len(occupancy.classified_zones()[1]), 0)
+        occupancy.update(np.vstack((ground, [[0.0, 0.0, 10.25]])), np.zeros(3))
+        self.assertEqual(len(occupancy.classified_zones()[1]), 1)
+
+    def test_failed_local_plane_does_not_change_safety_state(self):
+        occupancy = DynamicOccupancyMap(
+            np.empty((0, 3)), [zone()], obstacle_min_height_m=0.15,
+            min_obstacle_voxels=1,
+            local_ground={"enabled": True, "radius_m": 5.0, "minimum_inliers": 20},
+        )
+        occupancy.update(np.array([[0.0, 0.0, 11.0]]), np.zeros(3))
+        self.assertEqual(len(occupancy.classified_zones()[1]), 0)
+
     def test_centered_transform_uses_full_elevation_pivot(self):
         angle = np.deg2rad(2.0)
         matrix = np.eye(4)

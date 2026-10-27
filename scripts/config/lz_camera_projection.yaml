@@ -60,11 +60,21 @@ dynamic_occupancy:
   # blocks it; occupancy inside this outer margin downgrades it to risky.
   gps_wind_margin_m: 2.0
   # Mission requirement: reject obstacles at least 0.15 m above local ground.
-  # The measured map vertical RMSE is 0.058 m, so a one-sigma margin prevents
-  # a true 0.15 m obstacle from becoming a false negative after registration.
+  # Do not subtract registration uncertainty from this physical threshold:
+  # the rolling plane below removes the common local vertical offset directly.
   obstacle_min_height_m: 0.15
-  vertical_uncertainty_margin_m: 0.06
   vertical_clearance_m: 5.0
+  # Robust plane fitted once per LiDAR scan around the UAV ground projection.
+  # It covers the same 10 m safety-processing ROI, avoiding asynchronous camera
+  # centering and thousands of redundant candidate-by-candidate plane fits.
+  local_ground_plane:
+    enabled: true
+    radius_m: 10.0
+    ransac_distance_threshold_m: 0.10
+    maximum_slope_deg: 20.0
+    minimum_inliers: 80
+    ransac_iterations: 48
+    maximum_fit_points: 4000
   point_clustering:
     enabled: true
     radius_m: 0.25
@@ -154,7 +164,6 @@ semantic_segmentation:
   maximum_lidar_age_s: 0.15
   # Reject terrain returns that project through an object mask.
   minimum_height_above_ground_m: 0.15
-  vertical_uncertainty_margin_m: 0.06
   maximum_height_above_ground_m: 5.0
   vision_guided_lidar:
     # Vision selects a region to inspect but cannot block a zone by itself.
@@ -188,6 +197,7 @@ semantic_segmentation:
     # Duplicate tracks from projection error merge well below the measured
     # 5.9 m minimum spacing between distinct cargo boxes.
     duplicate_merge_radius_m: 1.50
+    confirmed_duplicate_merge_radius_m: 2.50
     static_voxel_size_m: 0.10
     # Applies to dynamic classes such as people. Cargo and vehicles persist and
     # accumulate support; dynamic tracks retain only their current point set.

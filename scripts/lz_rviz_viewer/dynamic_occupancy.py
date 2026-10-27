@@ -95,6 +95,68 @@ class CandidateEvidence:
     nearest_obstacle_m: float = np.inf
 
 
+@dataclass(frozen=True)
+class LocalGroundPlane:
+    center_xy: np.ndarray
+    coefficients: np.ndarray
+    inliers: int
+    residual_p95_m: float
+
+    def height(self, points_xy: np.ndarray) -> np.ndarray:
+        relative = np.asarray(points_xy, dtype=np.float64) - self.center_xy
+        return relative @ self.coefficients[:2] + self.coefficients[2]
+
+
+def fit_local_ground_plane(points: np.ndarray, center_xy: np.ndarray, config: dict,
+                           scan_index: int = 0) -> LocalGroundPlane | None:
+    """Fit the dominant near-horizontal surface in the current rolling scan."""
+    points = np.asarray(points, dtype=np.float64)
+    center_xy = np.asarray(center_xy, dtype=np.float64)
+    radius = float(config.get("radius_m", 10.0))
+    local = points[np.linalg.norm(points[:, :2] - center_xy, axis=1) <= radius]
+    local = local[np.isfinite(local).all(axis=1)]
+    minimum = int(config.get("minimum_inliers", 80))
+    if len(local) < minimum:
+        return None
+
+    maximum_samples = int(config.get("maximum_fit_points", 4000))
+    if len(local) > maximum_samples:
+        indices = np.linspace(0, len(local) - 1, maximum_samples, dtype=np.int64)
+        local = local[indices]
+    design = np.column_stack((local[:, :2] - center_xy, np.ones(len(local))))
+    threshold = float(config.get("ransac_distance_threshold_m", 0.10))
+    maximum_gradient = np.tan(np.radians(float(config.get("maximum_slope_deg", 20.0))))
+    rng = np.random.default_rng((int(scan_index) * 2654435761) & 0xFFFFFFFF)
+    best = np.zeros(len(local), dtype=bool)
+    best_error = np.inf
+    for _ in range(int(config.get("ransac_iterations", 48))):
+        sample = rng.choice(len(local), 3, replace=False)
+        try:
+            coefficients = np.linalg.solve(design[sample], local[sample, 2])
+        except np.linalg.LinAlgError:
+            continue
+        if np.linalg.norm(coefficients[:2]) > maximum_gradient:
+            continue
+        residual = np.abs(local[:, 2] - design @ coefficients)
+        inliers = residual <= threshold
+        count = int(np.count_nonzero(inliers))
+        error = float(np.median(residual[inliers])) if count else np.inf
+        if count > np.count_nonzero(best) or (count == np.count_nonzero(best)
+                                               and error < best_error):
+            best, best_error = inliers, error
+    if np.count_nonzero(best) < minimum:
+        return None
+    coefficients, *_ = np.linalg.lstsq(design[best], local[best, 2], rcond=None)
+    if np.linalg.norm(coefficients[:2]) > maximum_gradient:
+        return None
+    residual = np.abs(local[best, 2] - design[best] @ coefficients)
+    return LocalGroundPlane(
+        center_xy=center_xy, coefficients=coefficients,
+        inliers=int(np.count_nonzero(best)),
+        residual_p95_m=float(np.percentile(residual, 95)),
+    )
+
+
 class DynamicOccupancyMap:
     """Endpoint occupancy with baseline differencing and candidate evidence."""
 
@@ -111,7 +173,8 @@ class DynamicOccupancyMap:
                  clear_grid_resolution_m: float = 0.50,
                  clear_minimum_ground_points: int = 20,
                  clear_minimum_coverage: float = 0.25,
-                 clear_minimum_hazard_age_scans: int = 0) -> None:
+                 clear_minimum_hazard_age_scans: int = 0,
+                 local_ground: dict | None = None) -> None:
         self.resolution = float(resolution)
         self.coarse_resolution = float(coarse_resolution or resolution)
         if self.coarse_resolution < self.resolution:
@@ -130,6 +193,8 @@ class DynamicOccupancyMap:
         self.clear_minimum_ground_points = int(clear_minimum_ground_points)
         self.clear_minimum_coverage = float(clear_minimum_coverage)
         self.clear_minimum_hazard_age_scans = int(clear_minimum_hazard_age_scans)
+        self.local_ground = local_ground or {"enabled": False}
+        self.current_ground_plane: LocalGroundPlane | None = None
         self.clustering = clustering or {"enabled": False}
         self.interest_padding_m = float(interest_padding_m)
         self._zone_centers = np.asarray(
@@ -196,6 +261,14 @@ class DynamicOccupancyMap:
         points = np.asarray(points, dtype=np.float64)
         hazard_source = points if hazard_points is None else np.asarray(hazard_points, dtype=np.float64)
         self.scan_index += 1
+        if self.local_ground.get("enabled", False):
+            if sensor_origin is None:
+                self.current_ground_plane = None
+            else:
+                self.current_ground_plane = fit_local_ground_plane(
+                    hazard_source, np.asarray(sensor_origin)[:2], self.local_ground,
+                    self.scan_index,
+                )
         interest = self._interest_mask(points)
         keys = unique_rows(voxel_keys(points[interest], self.resolution))
         hazard_interest = self._interest_mask(hazard_source)
@@ -265,7 +338,10 @@ class DynamicOccupancyMap:
             grid_key = (int(np.floor(center[0] / self._cell_size)),
                         int(np.floor(center[1] / self._cell_size)))
             for zone in self._zone_grid.get(grid_key, []):
-                dz = center[2] - float(zone["z"])
+                ground_z = self._ground_height(center[:2], float(zone["z"]))
+                if ground_z is None:
+                    continue
+                dz = center[2] - ground_z
                 if dz < self.obstacle_min_height_m or dz > self.vertical_clearance_m:
                     continue
                 distance = float(np.hypot(center[0] - float(zone["x"]),
@@ -312,9 +388,11 @@ class DynamicOccupancyMap:
             if len(footprint) < self.clear_minimum_ground_points:
                 self.zone_clear_hits[rank] = 0
                 continue
-            dz = footprint[:, 2] - float(zone["z"])
-            elevated = ((dz >= self.obstacle_min_height_m)
-                        & (dz <= self.vertical_clearance_m))
+            ground_z = self._ground_heights(footprint[:, :2], float(zone["z"]))
+            if ground_z is None:
+                self.zone_clear_hits[rank] = 0
+                continue
+            dz = footprint[:, 2] - ground_z
             ground = footprint[np.abs(dz) <= self.clear_ground_tolerance_m]
             grid = np.floor(
                 (ground[:, :2] - (center - radius)) / self.clear_grid_resolution_m
@@ -323,7 +401,8 @@ class DynamicOccupancyMap:
             expected_cells = max(1, int(np.pi * radius * radius
                                         / self.clear_grid_resolution_m ** 2))
             coverage = observed_cells / expected_cells
-            clear = not np.any(elevated) and coverage >= self.clear_minimum_coverage
+            elevated_clusters, _ = self._clustered_hazard_points(footprint, sensor_origin)
+            clear = len(elevated_clusters) == 0 and coverage >= self.clear_minimum_coverage
             self.zone_clear_hits[rank] = self.zone_clear_hits.get(rank, 0) + 1 if clear else 0
             if self.zone_clear_hits[rank] < self.hazard_clear_after_scans:
                 continue
@@ -367,11 +446,14 @@ class DynamicOccupancyMap:
         if not len(points):
             return points, points
         distance, zone_index = self._zone_tree.query(points[:, :2], k=1)
-        zone_z = np.asarray([float(self.zones[index]["z"]) for index in zone_index])
         reach = np.asarray([
             float(self.zones[index]["radius"]) + self.gps_margin_m for index in zone_index
         ])
-        dz = points[:, 2] - zone_z
+        fallback_z = np.asarray([float(self.zones[index]["z"]) for index in zone_index])
+        ground_z = self._ground_heights(points[:, :2], fallback_z)
+        if ground_z is None:
+            return np.empty((0, 3), dtype=np.float64), np.empty((0, 3), dtype=np.float64)
+        dz = points[:, 2] - ground_z
         keep = (
             (distance <= reach) & (dz >= self.obstacle_min_height_m)
             & (dz <= self.vertical_clearance_m)
@@ -424,8 +506,9 @@ class DynamicOccupancyMap:
                 )
             if count >= minimum:
                 accepted.append(cluster)
-                _, nearest_zone = self._zone_tree.query(np.median(cluster[:, :2], axis=0), k=1)
-                maximum_height = float(np.max(cluster[:, 2]) - float(self.zones[int(nearest_zone)]["z"]))
+                cluster_ground = self._ground_heights(cluster[:, :2], None)
+                maximum_height = (float(np.max(cluster[:, 2] - cluster_ground))
+                                  if cluster_ground is not None else 0.0)
                 if (count >= immediate_minimum
                         and maximum_height >= float(
                             self.clustering.get("immediate_minimum_height_m", 0.30)
@@ -434,6 +517,21 @@ class DynamicOccupancyMap:
         empty = np.empty((0, 3), dtype=np.float64)
         return (np.vstack(accepted) if accepted else empty,
                 np.vstack(immediate) if immediate else empty)
+
+    def _ground_heights(self, points_xy: np.ndarray,
+                        fallback: np.ndarray | float | None) -> np.ndarray | None:
+        if self.local_ground.get("enabled", False):
+            if self.current_ground_plane is None:
+                return None
+            return self.current_ground_plane.height(points_xy)
+        if fallback is None:
+            _, zone_index = self._zone_tree.query(points_xy, k=1)
+            return np.asarray([float(self.zones[index]["z"]) for index in zone_index])
+        return np.broadcast_to(np.asarray(fallback, dtype=np.float64), len(points_xy))
+
+    def _ground_height(self, point_xy: np.ndarray, fallback: float) -> float | None:
+        values = self._ground_heights(np.asarray(point_xy)[None, :], fallback)
+        return None if values is None else float(values[0])
 
     def occupancy_layers(self, include_baseline: bool = True,
                          confirmed_only: bool = True,

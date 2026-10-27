@@ -43,8 +43,8 @@ from project_lz_into_bag_camera import (  # noqa: E402
     open_reader, read_pose_and_gps, require_ros, stamp_ns,
 )
 from semantic_lz.semantic_fusion import (  # noqa: E402
-    STATIC_CLASSES, OpenVocabularySegmenter, SemanticObjectTracker, colorize_frame,
-    compact_supported_clusters, filter_semantic_result, labels_at_pixels,
+    CLASS_COLORS_RGB, STATIC_CLASSES, OpenVocabularySegmenter, SemanticObjectTracker,
+    colorize_frame, compact_supported_clusters, filter_semantic_result, labels_at_pixels,
 )
 from semantic_lz.ground_reference import (  # noqa: E402
     GROUND_REFERENCE_MODES, estimate_detection_ground,
@@ -179,6 +179,7 @@ class LandingZoneRvizReplay(Node):
             "above_ground_points": Counter(), "guided_points": Counter(),
             "height_residuals_m": {}, "semantic_observations": [],
         }
+        self.latest_vision_proposals: list[dict] = []
         self.stop = threading.Event()
         with args.config.open(encoding="utf-8") as handle:
             self.config = yaml.safe_load(handle)
@@ -229,10 +230,7 @@ class LandingZoneRvizReplay(Node):
             full_cloud, self.zones,
             resolution=float(dynamic["resolution_m"]),
             gps_margin_m=float(dynamic["gps_wind_margin_m"]),
-            obstacle_min_height_m=max(
-                0.0, float(dynamic["obstacle_min_height_m"])
-                - float(dynamic.get("vertical_uncertainty_margin_m", 0.0))
-            ),
+            obstacle_min_height_m=float(dynamic["obstacle_min_height_m"]),
             vertical_clearance_m=float(dynamic["vertical_clearance_m"]),
             min_obstacle_voxels=int(dynamic["confirmation_hits"]),
             coarse_resolution=float(dynamic["coarse_resolution_m"]),
@@ -250,6 +248,7 @@ class LandingZoneRvizReplay(Node):
             clear_minimum_hazard_age_scans=int(
                 dynamic.get("clear_minimum_hazard_age_scans", 0)
             ),
+            local_ground=dynamic.get("local_ground_plane"),
         )
         self.active_zones, self.blocked_zones = self.occupancy.classified_zones()
 
@@ -290,6 +289,9 @@ class LandingZoneRvizReplay(Node):
             history_size=int(verification.get("history_size", 60)),
             duplicate_merge_radius_m=float(
                 verification.get("duplicate_merge_radius_m", 1.5)
+            ),
+            confirmed_duplicate_merge_radius_m=float(
+                verification.get("confirmed_duplicate_merge_radius_m", 2.5)
             ),
             static_voxel_size_m=float(verification.get("static_voxel_size_m", 0.10)),
         )
@@ -380,7 +382,8 @@ class LandingZoneRvizReplay(Node):
 
     def dynamic_markers(self, timestamp_ns: int, visible_zones: list[dict], trajectory: list[np.ndarray],
                         uav: np.ndarray, camera: np.ndarray, footprint: list[list[float]],
-                        frame_number: int, gnss_uav: np.ndarray) -> MarkerArray:
+                        frame_number: int, gnss_uav: np.ndarray,
+                        vision_proposals: list[dict] | None = None) -> MarkerArray:
         clear = Marker()
         clear.header.frame_id = FRAME_ID
         ros_stamp(clear, timestamp_ns)
@@ -422,6 +425,45 @@ class LandingZoneRvizReplay(Node):
             local = value - self.origin
             registration.points.append(Point(x=float(local[0]), y=float(local[1]), z=float(local[2])))
         semantic_markers: list[Marker] = []
+        for proposal_index, proposal in enumerate(vision_proposals or []):
+            center = np.asarray(proposal["center"], dtype=np.float64)
+            color_rgb = np.asarray(CLASS_COLORS_RGB[proposal["class_name"]]) / 255.0
+            proposal_marker = marker(
+                8000 + 3 * proposal_index, "vision_only_proposals", Marker.SPHERE,
+                (*map(float, color_rgb), 0.72), 0.36, timestamp_ns,
+            )
+            local = center - self.origin
+            proposal_marker.pose.position = Point(
+                x=float(local[0]), y=float(local[1]), z=float(local[2] + 0.18),
+            )
+            semantic_markers.append(proposal_marker)
+            covariance = np.asarray(proposal["covariance_xy"], dtype=np.float64)
+            eigenvalues, eigenvectors = np.linalg.eigh(covariance)
+            angles = np.linspace(0.0, 2.0 * np.pi, 49)
+            axes = 2.0 * np.sqrt(np.maximum(eigenvalues, 0.04))
+            ellipse = marker(
+                8001 + 3 * proposal_index, "vision_only_covariance", Marker.LINE_STRIP,
+                (*map(float, color_rgb), 0.55), 0.06, timestamp_ns,
+            )
+            for angle in angles:
+                offset = eigenvectors @ (axes * [np.cos(angle), np.sin(angle)])
+                ellipse.points.append(Point(
+                    x=float(local[0] + offset[0]), y=float(local[1] + offset[1]),
+                    z=float(local[2] + 0.20),
+                ))
+            semantic_markers.append(ellipse)
+            proposal_label = marker(
+                8002 + 3 * proposal_index, "vision_only_labels", Marker.TEXT_VIEW_FACING,
+                (*map(float, color_rgb), 1.0), 0.30, timestamp_ns,
+            )
+            proposal_label.pose.position = Point(
+                x=float(local[0]), y=float(local[1]), z=float(local[2] + 0.70),
+            )
+            proposal_label.text = (
+                f"{proposal['class_name']} | vision provisional "
+                f"| conf {proposal['confidence']:.2f}"
+            )
+            semantic_markers.append(proposal_label)
         for track in self.guided_lidar_tracker.tracks:
             centers = np.asarray(track.centers, dtype=np.float64)
             covariance = (np.cov(centers[:, :2], rowvar=False)
@@ -710,6 +752,7 @@ class LandingZoneRvizReplay(Node):
                     )
                     map_to_optical = compose(map_to_ortho.inverse(), ortho_to_optical)
                 semantic_result = None
+                vision_proposals: list[dict] = []
                 semantic = self.config.get("semantic_segmentation", {})
                 inference_stride = int(semantic.get("inference_stride", 1))
                 if self.segmenter is not None and frame_number % inference_stride == 0:
@@ -741,12 +784,6 @@ class LandingZoneRvizReplay(Node):
                         selected_detection = labels[selected] - 1
                         minimum_height = max(
                             0.0, float(semantic.get("minimum_height_above_ground_m", 0.15))
-                            - float(semantic.get(
-                                "vertical_uncertainty_margin_m",
-                                self.config["dynamic_occupancy"].get(
-                                    "vertical_uncertainty_margin_m", 0.0,
-                                ),
-                            ))
                         )
                         maximum_height = float(semantic.get("maximum_height_above_ground_m", 3.0))
                         ground_mode = str(semantic.get(
@@ -871,17 +908,61 @@ class LandingZoneRvizReplay(Node):
                         }
                 if semantic_result is not None:
                     verification = semantic.get("vision_guided_lidar", {})
+                    thresholds = verification.get("minimum_image_confidence", {})
+                    mask_limits = verification.get("maximum_mask_fraction", {})
+                    for class_name, confidence, mask in zip(
+                            semantic_result.class_names, semantic_result.confidences,
+                            semantic_result.masks):
+                        class_name = str(class_name)
+                        mask_fraction = float(np.count_nonzero(mask) / mask.size)
+                        if (confidence < float(thresholds.get(class_name, 1.0))
+                                or mask_fraction > float(mask_limits.get(class_name, 1.0))):
+                            continue
+                        rows, columns = np.nonzero(mask)
+                        if not len(rows):
+                            continue
+                        sample = np.linspace(0, len(rows) - 1, min(500, len(rows)), dtype=np.int64)
+                        pixels_to_project = np.column_stack((columns[sample], rows[sample])).astype(np.float64)
+                        normalized = cv2.undistortPoints(
+                            pixels_to_project.reshape(-1, 1, 2), camera_matrix, distortion,
+                        ).reshape(-1, 2)
+                        rays = (ortho_to_optical.matrix[:3, :3]
+                                @ np.column_stack((normalized, np.ones(len(normalized)))).T).T
+                        valid = rays[:, 2] < -1e-6
+                        ground_points = []
+                        for ray in rays[valid]:
+                            scale = (ground_z - ortho_to_optical.translation[2]) / ray[2]
+                            for _ in range(4):
+                                value = ortho_to_optical.translation + scale * ray
+                                terrain_z = self.terrain.height(float(value[0]), float(value[1]))
+                                if terrain_z is None:
+                                    break
+                                scale = (terrain_z - ortho_to_optical.translation[2]) / ray[2]
+                            if scale > 0.0:
+                                ground_points.append(ortho_to_optical.translation + scale * ray)
+                        if not ground_points:
+                            continue
+                        projected = np.asarray(ground_points)
+                        center = np.median(projected, axis=0)
+                        covariance = (np.cov(projected[:, :2], rowvar=False)
+                                      if len(projected) > 1 else np.eye(2) * 0.25)
+                        vision_proposals.append({
+                            "class_name": class_name, "confidence": float(confidence),
+                            "center": center, "covariance_xy": covariance,
+                        })
+                    self.latest_vision_proposals = vision_proposals
                     frame = colorize_frame(frame, filter_semantic_result(
                         semantic_result,
-                        verification.get("minimum_image_confidence", {}),
-                        verification.get("maximum_mask_fraction", {}),
+                        thresholds, mask_limits,
                     ))
                 semantic_points, semantic_colors = self.guided_lidar_tracker.point_cloud()
                 current_frame = frame_number + 1
                 static_updates = [
                     track.accumulated_points
                     for track in self.guided_lidar_tracker.tracks
-                    if track.class_name in STATIC_CLASSES and track.last_frame == current_frame
+                    if (track.class_name in STATIC_CLASSES
+                        and track.last_frame == current_frame
+                        and track.observations >= self.guided_lidar_tracker.confirmation_frames)
                 ]
                 dynamic_support = [
                     track.points for track in self.guided_lidar_tracker.tracks
@@ -944,6 +1025,7 @@ class LandingZoneRvizReplay(Node):
                 replay_markers = self.dynamic_markers(
                     timestamp, [zones_by_rank[rank] for rank in ranks if rank in zones_by_rank], trajectory,
                     uav, ortho_to_optical.translation, footprint, frame_number, gnss_uav,
+                    self.latest_vision_proposals,
                 )
                 if self.args.metrics_json is None:
                     self.publish_image(frame, timestamp)
