@@ -193,6 +193,10 @@ semantic_segmentation:
     # A null timeout means they remain until a matching observation updates
     # their position. They are visualization evidence and never block an LZ.
     vision_proposal_association_radius_m: 2.0
+    # Covariance-aware 2D chi-square gate (99%, two degrees of freedom), with
+    # a hard cap below the measured 5.9 m spacing of distinct cargo boxes.
+    vision_proposal_mahalanobis_gate: 9.21
+    vision_proposal_merge_radius_m: 2.5
     vision_proposal_retention_s:
       person: null
       cargo_box: null

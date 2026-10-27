@@ -40,6 +40,30 @@ class SemanticTrackingTests(unittest.TestCase):
         tracker.update([self.proposal()], 1_000_000_000)
         self.assertEqual(len(tracker.active(3_601_000_000_000)), 1)
 
+    def test_covariance_overlap_merges_duplicate_camera_tracks(self):
+        tracker = VisionProposalTracker(
+            association_radius_m=0.5, merge_radius_m=2.5,
+            mahalanobis_gate=9.21, retention_s={"person": None},
+        )
+        tracker.update([self.proposal(0.0)], 1_000_000_000)
+        tracker.update([self.proposal(1.5)], 2_000_000_000)
+        self.assertEqual(len(tracker.proposals), 1)
+        self.assertEqual(tracker.proposals[0]["proposal_id"], 1)
+        self.assertEqual(tracker.proposals[0]["observations"], 2)
+        self.assertGreater(tracker.proposals[0]["covariance_xy"][0, 0], 0.04)
+
+    def test_hard_cap_prevents_broad_covariance_merging_distinct_items(self):
+        tracker = VisionProposalTracker(
+            association_radius_m=2.0, merge_radius_m=2.5,
+            mahalanobis_gate=9.21, retention_s={"person": None},
+        )
+        broad = self.proposal(0.0)
+        broad["covariance_xy"] = np.eye(2) * 100.0
+        other = self.proposal(5.9)
+        other["covariance_xy"] = np.eye(2) * 100.0
+        tracker.update([broad, other], 1_000_000_000)
+        self.assertEqual(len(tracker.proposals), 2)
+
     def test_confirmed_track_absorbs_offset_duplicate(self):
         tracker = SemanticObjectTracker(
             confirmation_frames=3, association_radius_m=0.5,

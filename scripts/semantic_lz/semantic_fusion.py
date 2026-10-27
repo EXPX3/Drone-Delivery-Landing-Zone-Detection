@@ -90,12 +90,16 @@ class SemanticVoxelMemory:
 
 
 class VisionProposalTracker:
-    """Short-term 3D display memory for camera-only ground projections."""
+    """Persistent camera-only tracks with covariance-aware data association."""
 
     def __init__(self, association_radius_m: float = 2.0,
                  retention_s: dict[str, float | None] | None = None,
-                 smoothing: float = 0.35) -> None:
+                 smoothing: float = 0.35, merge_radius_m: float = 2.5,
+                 mahalanobis_gate: float = 9.21, history_size: int = 60) -> None:
         self.association_radius_m = float(association_radius_m)
+        self.merge_radius_m = float(merge_radius_m)
+        self.mahalanobis_gate = float(mahalanobis_gate)
+        self.history_size = int(history_size)
         self.retention_s = retention_s or {
             "person": 2.0, "cargo_box": 3.0, "vehicle": 3.0,
         }
@@ -103,25 +107,61 @@ class VisionProposalTracker:
         self.proposals: list[dict] = []
         self._next_id = 1
 
+    @staticmethod
+    def _regularized_covariance(value: np.ndarray) -> np.ndarray:
+        covariance = np.asarray(value, dtype=np.float64).reshape(2, 2)
+        covariance = 0.5 * (covariance + covariance.T)
+        eigenvalues, eigenvectors = np.linalg.eigh(covariance)
+        # 20 cm minimum standard deviation avoids singular gates; the upper
+        # bound prevents an oversized image mask from merging distant objects.
+        eigenvalues = np.clip(eigenvalues, 0.04, 4.0)
+        return eigenvectors @ np.diag(eigenvalues) @ eigenvectors.T
+
+    def _distance(self, first: dict, second: dict) -> tuple[float, float]:
+        delta = np.asarray(first["center"])[:2] - np.asarray(second["center"])[:2]
+        euclidean = float(np.linalg.norm(delta))
+        covariance = (
+            self._regularized_covariance(first["covariance_xy"])
+            + self._regularized_covariance(second["covariance_xy"])
+        )
+        mahalanobis = float(delta @ np.linalg.pinv(covariance) @ delta)
+        return euclidean, mahalanobis
+
+    def _refresh_statistics(self, item: dict) -> None:
+        centers = np.asarray(item["centers"], dtype=np.float64)
+        item["center"] = np.median(centers, axis=0)
+        empirical = (np.cov(centers[:, :2], rowvar=False)
+                     if len(centers) > 1 else np.zeros((2, 2)))
+        measurement = self._regularized_covariance(item["measurement_covariance_xy"])
+        item["covariance_xy"] = self._regularized_covariance(
+            empirical + measurement / max(1, len(centers))
+        )
+
     def update(self, detections: list[dict], timestamp_ns: int) -> list[dict]:
         used: set[int] = set()
         for detection in detections:
             center = np.asarray(detection["center"], dtype=np.float64)
-            candidates = [
-                (float(np.linalg.norm(np.asarray(item["center"])[:2] - center[:2])), index)
-                for index, item in enumerate(self.proposals)
-                if index not in used and item["class_name"] == detection["class_name"]
-            ]
-            distance, index = min(candidates, default=(np.inf, -1))
-            if distance <= self.association_radius_m:
+            candidate = dict(detection)
+            candidate["covariance_xy"] = self._regularized_covariance(
+                detection["covariance_xy"]
+            )
+            candidates = []
+            for index, item in enumerate(self.proposals):
+                if index in used or item["class_name"] != detection["class_name"]:
+                    continue
+                euclidean, mahalanobis = self._distance(item, candidate)
+                if (euclidean <= self.association_radius_m
+                        and mahalanobis <= self.mahalanobis_gate):
+                    candidates.append((mahalanobis, euclidean, index))
+            _, _, index = min(candidates, default=(np.inf, np.inf, -1))
+            if index >= 0:
                 item = self.proposals[index]
-                item["center"] = (
-                    (1.0 - self.smoothing) * np.asarray(item["center"])
-                    + self.smoothing * center
-                )
-                item["covariance_xy"] = (
-                    (1.0 - self.smoothing) * np.asarray(item["covariance_xy"])
-                    + self.smoothing * np.asarray(detection["covariance_xy"])
+                item["centers"].append(center.copy())
+                item["centers"] = item["centers"][-self.history_size:]
+                item["measurement_covariance_xy"] = (
+                    (1.0 - self.smoothing)
+                    * np.asarray(item["measurement_covariance_xy"])
+                    + self.smoothing * candidate["covariance_xy"]
                 )
                 item["confidence"] = float(detection["confidence"])
                 item["maximum_confidence"] = max(
@@ -129,6 +169,7 @@ class VisionProposalTracker:
                 )
                 item["observations"] += 1
                 item["last_seen_ns"] = int(timestamp_ns)
+                self._refresh_statistics(item)
                 used.add(index)
             else:
                 item = dict(detection)
@@ -137,11 +178,54 @@ class VisionProposalTracker:
                     "maximum_confidence": float(detection["confidence"]),
                     "observations": 1,
                     "last_seen_ns": int(timestamp_ns),
+                    "centers": [center.copy()],
+                    "measurement_covariance_xy": candidate["covariance_xy"].copy(),
                 })
+                self._refresh_statistics(item)
                 self.proposals.append(item)
                 used.add(len(self.proposals) - 1)
                 self._next_id += 1
+        self._merge_duplicates()
         return self.active(timestamp_ns)
+
+    def _merge_duplicates(self) -> None:
+        changed = True
+        while changed:
+            changed = False
+            for first_index, first in enumerate(self.proposals):
+                for second_index in range(first_index + 1, len(self.proposals)):
+                    second = self.proposals[second_index]
+                    if first["class_name"] != second["class_name"]:
+                        continue
+                    euclidean, mahalanobis = self._distance(first, second)
+                    if (euclidean > self.merge_radius_m
+                            or mahalanobis > self.mahalanobis_gate):
+                        continue
+                    keep, merge = ((first, second)
+                                   if first["proposal_id"] < second["proposal_id"]
+                                   else (second, first))
+                    keep["centers"] = (
+                        keep["centers"] + merge["centers"]
+                    )[-self.history_size:]
+                    total = keep["observations"] + merge["observations"]
+                    keep["measurement_covariance_xy"] = (
+                        keep["measurement_covariance_xy"] * keep["observations"]
+                        + merge["measurement_covariance_xy"] * merge["observations"]
+                    ) / total
+                    keep["observations"] = total
+                    keep["confidence"] = (merge["confidence"]
+                                          if merge["last_seen_ns"] >= keep["last_seen_ns"]
+                                          else keep["confidence"])
+                    keep["maximum_confidence"] = max(
+                        keep["maximum_confidence"], merge["maximum_confidence"],
+                    )
+                    keep["last_seen_ns"] = max(keep["last_seen_ns"], merge["last_seen_ns"])
+                    self._refresh_statistics(keep)
+                    self.proposals = [item for item in self.proposals if item is not merge]
+                    changed = True
+                    break
+                if changed:
+                    break
 
     def active(self, timestamp_ns: int) -> list[dict]:
         self.proposals = [

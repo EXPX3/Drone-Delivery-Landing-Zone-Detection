@@ -292,6 +292,13 @@ class LandingZoneRvizReplay(Node):
                     {"person": 2.0, "cargo_box": 3.0, "vehicle": 3.0},
                 ).items()
             },
+            merge_radius_m=float(
+                verification.get("vision_proposal_merge_radius_m", 2.5)
+            ),
+            mahalanobis_gate=float(
+                verification.get("vision_proposal_mahalanobis_gate", 9.21)
+            ),
+            history_size=int(verification.get("history_size", 60)),
         )
         self.guided_lidar_tracker = SemanticObjectTracker(
             cluster_radius_m=float(verification.get("cluster_radius_m", 0.75)),
