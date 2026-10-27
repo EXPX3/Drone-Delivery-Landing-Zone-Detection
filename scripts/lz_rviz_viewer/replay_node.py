@@ -286,7 +286,8 @@ class LandingZoneRvizReplay(Node):
                 verification.get("vision_proposal_association_radius_m", 2.0)
             ),
             retention_s={
-                str(name): float(value) for name, value in verification.get(
+                str(name): (None if value is None else float(value))
+                for name, value in verification.get(
                     "vision_proposal_retention_s",
                     {"person": 2.0, "cargo_box": 3.0, "vehicle": 3.0},
                 ).items()
@@ -473,7 +474,8 @@ class LandingZoneRvizReplay(Node):
             proposal_label.text = (
                 f"{proposal['class_name']} | vision provisional "
                 f"#{proposal['proposal_id']} | conf {proposal['confidence']:.2f} "
-                f"| obs {proposal['observations']}"
+                f"| obs {proposal['observations']} | last seen "
+                f"{max(0.0, (timestamp_ns - proposal['last_seen_ns']) / 1e9):.1f}s"
             )
             semantic_markers.append(proposal_label)
         for track in self.guided_lidar_tracker.tracks:

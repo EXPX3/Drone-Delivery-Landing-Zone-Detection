@@ -35,6 +35,11 @@ class SemanticTrackingTests(unittest.TestCase):
         self.assertEqual(tracker.proposals[0]["observations"], 2)
         self.assertEqual(tracker.proposals[0]["proposal_id"], 1)
 
+    def test_camera_proposal_with_no_timeout_persists_indefinitely(self):
+        tracker = VisionProposalTracker(retention_s={"person": None})
+        tracker.update([self.proposal()], 1_000_000_000)
+        self.assertEqual(len(tracker.active(3_601_000_000_000)), 1)
+
     def test_confirmed_track_absorbs_offset_duplicate(self):
         tracker = SemanticObjectTracker(
             confirmation_frames=3, association_radius_m=0.5,

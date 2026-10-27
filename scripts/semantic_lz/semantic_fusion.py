@@ -93,7 +93,7 @@ class VisionProposalTracker:
     """Short-term 3D display memory for camera-only ground projections."""
 
     def __init__(self, association_radius_m: float = 2.0,
-                 retention_s: dict[str, float] | None = None,
+                 retention_s: dict[str, float | None] | None = None,
                  smoothing: float = 0.35) -> None:
         self.association_radius_m = float(association_radius_m)
         self.retention_s = retention_s or {
@@ -146,7 +146,8 @@ class VisionProposalTracker:
     def active(self, timestamp_ns: int) -> list[dict]:
         self.proposals = [
             item for item in self.proposals
-            if (timestamp_ns - int(item["last_seen_ns"])) / 1e9
+            if self.retention_s.get(item["class_name"], 2.0) is None
+            or (timestamp_ns - int(item["last_seen_ns"])) / 1e9
             <= float(self.retention_s.get(item["class_name"], 2.0))
         ]
         return self.proposals
