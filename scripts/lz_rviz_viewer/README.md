@@ -74,6 +74,12 @@ and other elevated returns remain in one map. `Corrected Update-Only Ground` and
 `Confirmed Scene Changes` are filtered diagnostic subsets and must not be treated as
 a complete scene replacement.
 
+The full-scene color channel is height above the nearest corrected ground cell,
+rather than absolute UTM elevation. Ground (`0 m`) is red and elevated returns
+transition through brighter warm colors toward pale yellow at `3 m`; values above
+`3 m` retain the maximum color. This prevents terrain slope from being mistaken for
+obstacle height.
+
 The primary cloud uses a fixed Z-axis rainbow scale from `-0.5 m` to `2.2 m`
 relative to the displayed cloud origin. This gives near-ground boxes and human-height
 returns more color separation than automatic scaling over trees and other tall data.

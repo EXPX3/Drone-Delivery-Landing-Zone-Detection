@@ -9,6 +9,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 import rclpy
+from scipy.spatial import cKDTree
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import PointCloud2, PointField
@@ -60,10 +61,15 @@ def read_pcd(path: Path) -> tuple[list[str], np.ndarray]:
     return fields, values
 
 
-def cloud_message(fields: list[str], values: np.ndarray, origin: np.ndarray) -> PointCloud2:
+def cloud_message(fields: list[str], values: np.ndarray, origin: np.ndarray,
+                  intensity_override: np.ndarray | None = None) -> PointCloud2:
     indices = [fields.index(name) for name in ("x", "y", "z")]
     xyz = values[:, indices] - origin
-    if "count" in fields:
+    if intensity_override is not None:
+        intensity = np.asarray(intensity_override, dtype=np.float64)
+        if len(intensity) != len(values):
+            raise ValueError("Intensity override must have one value per point")
+    elif "count" in fields:
         intensity = values[:, fields.index("count")]
     else:
         intensity = np.ones(len(values))
@@ -195,22 +201,34 @@ class AuditPublisher(Node):
                 len(direct), args.maximum_direct_points, replace=False,
             )
             direct = direct[index]
+        if not len(ground):
+            raise ValueError("Corrected ground map is empty inside the selected ROI")
+        direct_xyz = direct[:, [direct_fields.index(name) for name in ("x", "y", "z")]]
+        ground_xyz = ground[:, [ground_fields.index(name) for name in ("x", "y", "z")]]
+        _, nearest_ground = cKDTree(ground_xyz[:, :2]).query(direct_xyz[:, :2], workers=-1)
+        direct_height_agl = np.maximum(0.0, direct_xyz[:, 2] - ground_xyz[nearest_ground, 2])
+        self.get_logger().info(
+            "Full-scene height above corrected ground: "
+            f"median {np.median(direct_height_agl):.2f} m, "
+            f"P95 {np.percentile(direct_height_agl, 95):.2f} m, "
+            f"maximum {np.max(direct_height_agl):.2f} m"
+        )
         qos = QoSProfile(
             history=HistoryPolicy.KEEP_LAST, depth=1,
             reliability=ReliabilityPolicy.RELIABLE,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
         )
         layers = [
-            ("/ddlzd/audit/reference_ground", reference_fields, reference),
-            ("/ddlzd/audit/direct_pointcloud", direct_fields, direct),
-            ("/ddlzd/audit/corrected_ground", ground_fields, ground),
-            ("/ddlzd/audit/scene_changes", change_fields, changes),
+            ("/ddlzd/audit/reference_ground", reference_fields, reference, None),
+            ("/ddlzd/audit/direct_pointcloud", direct_fields, direct, direct_height_agl),
+            ("/ddlzd/audit/corrected_ground", ground_fields, ground, None),
+            ("/ddlzd/audit/scene_changes", change_fields, changes, None),
         ]
         self._layer_publishers = []
         self._layer_messages = []
-        for topic, fields, values in layers:
+        for topic, fields, values, intensity in layers:
             publisher = self.create_publisher(PointCloud2, topic, qos)
-            message = cloud_message(fields, values, self.origin)
+            message = cloud_message(fields, values, self.origin, intensity)
             publisher.publish(message)
             self._layer_publishers.append(publisher)
             self._layer_messages.append(message)
