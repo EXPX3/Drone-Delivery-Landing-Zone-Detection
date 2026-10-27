@@ -22,10 +22,10 @@ class SemanticTrackingTests(unittest.TestCase):
         }
 
     def test_camera_person_survives_short_detection_dropout(self):
-        tracker = VisionProposalTracker(retention_s={"person": 2.0})
+        tracker = VisionProposalTracker(retention_s={"person": 10.0})
         tracker.update([self.proposal()], 1_000_000_000)
-        self.assertEqual(len(tracker.active(2_900_000_000)), 1)
-        self.assertEqual(len(tracker.active(3_100_000_000)), 0)
+        self.assertEqual(len(tracker.active(10_900_000_000)), 1)
+        self.assertEqual(len(tracker.active(11_100_000_000)), 0)
 
     def test_camera_person_updates_existing_proposal(self):
         tracker = VisionProposalTracker(association_radius_m=2.0)
