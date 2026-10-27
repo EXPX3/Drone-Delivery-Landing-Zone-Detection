@@ -156,8 +156,17 @@ Visualization Manager:
         camera_visible_lz: true
         geographic_registration: true
         replay_sync: true
+        semantic_covariance_1sigma: true
+        semantic_covariance_2sigma: true
+        semantic_covariance_3sigma: true
+        semantic_gaussian_surface: true
+        semantic_track_centroids: true
+        semantic_track_labels: true
         uav: true
         uav_trajectory: true
+        vision_only_covariance: true
+        vision_only_labels: true
+        vision_only_proposals: true
       Topic:
         Depth: 5
         Durability Policy: Volatile

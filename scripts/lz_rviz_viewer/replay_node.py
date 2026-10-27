@@ -968,6 +968,19 @@ class LandingZoneRvizReplay(Node):
                         thresholds, mask_limits,
                     ))
                 semantic_points, semantic_colors = self.guided_lidar_tracker.point_cloud()
+                active_vision_proposals = self.vision_proposal_tracker.active(timestamp)
+                if active_vision_proposals:
+                    proposal_points = np.asarray([
+                        proposal["center"] for proposal in active_vision_proposals
+                    ], dtype=np.float64)
+                    proposal_colors = np.asarray([
+                        CLASS_COLORS_RGB[proposal["class_name"]]
+                        for proposal in active_vision_proposals
+                    ], dtype=np.uint8)
+                    semantic_points = (np.vstack((semantic_points, proposal_points))
+                                       if len(semantic_points) else proposal_points)
+                    semantic_colors = (np.vstack((semantic_colors, proposal_colors))
+                                       if len(semantic_colors) else proposal_colors)
                 current_frame = frame_number + 1
                 static_updates = [
                     track.accumulated_points
@@ -1037,7 +1050,7 @@ class LandingZoneRvizReplay(Node):
                 replay_markers = self.dynamic_markers(
                     timestamp, [zones_by_rank[rank] for rank in ranks if rank in zones_by_rank], trajectory,
                     uav, ortho_to_optical.translation, footprint, frame_number, gnss_uav,
-                    self.vision_proposal_tracker.active(timestamp),
+                    active_vision_proposals,
                 )
                 if self.args.metrics_json is None:
                     self.publish_image(frame, timestamp)
