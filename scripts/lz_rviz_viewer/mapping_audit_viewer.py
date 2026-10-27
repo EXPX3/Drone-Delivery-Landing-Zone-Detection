@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import cv2
 import numpy as np
 import rclpy
 from rclpy.node import Node
@@ -85,6 +86,45 @@ def cloud_message(fields: list[str], values: np.ndarray, origin: np.ndarray) -> 
     return message
 
 
+def orthophoto_message(path: Path, bounds: tuple[float, float, float, float],
+                       elevation: float, origin: np.ndarray, stride: int) -> PointCloud2:
+    image = cv2.imread(str(path), cv2.IMREAD_COLOR)
+    if image is None:
+        raise ValueError(f"Could not read orthophoto: {path}")
+    height, width = image.shape[:2]
+    rows = np.arange(0, height, stride, dtype=np.int32)
+    cols = np.arange(0, width, stride, dtype=np.int32)
+    cc, rr = np.meshgrid(cols, rows)
+    min_x, min_y, max_x, max_y = bounds
+    x = min_x + cc.ravel() / max(1, width - 1) * (max_x - min_x)
+    y = max_y - rr.ravel() / max(1, height - 1) * (max_y - min_y)
+    bgr = image[rr.ravel(), cc.ravel()]
+    rgb_bits = ((bgr[:, 2].astype(np.uint32) << 16)
+                | (bgr[:, 1].astype(np.uint32) << 8)
+                | bgr[:, 0].astype(np.uint32))
+    packed = np.empty(len(x), dtype=[("x", "<f4"), ("y", "<f4"),
+                                     ("z", "<f4"), ("rgb", "<u4")])
+    packed["x"] = x - origin[0]
+    packed["y"] = y - origin[1]
+    packed["z"] = elevation - origin[2]
+    packed["rgb"] = rgb_bits
+    message = PointCloud2()
+    message.header = Header(frame_id="lz_world")
+    message.height = 1
+    message.width = len(packed)
+    message.fields = [
+        PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
+        PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
+        PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
+        PointField(name="rgb", offset=12, datatype=PointField.UINT32, count=1),
+    ]
+    message.point_step = 16
+    message.row_step = message.point_step * message.width
+    message.is_dense = True
+    message.data = packed.tobytes()
+    return message
+
+
 def crop_xy(fields: list[str], values: np.ndarray, center: np.ndarray, radius: float) -> np.ndarray:
     if radius <= 0:
         return values
@@ -134,6 +174,12 @@ class AuditPublisher(Node):
         change_fields, changes = read_pcd(args.changes)
         reference_xyz = reference[:, [reference_fields.index(name) for name in ("x", "y", "z")]]
         self.origin = np.median(reference_xyz, axis=0)
+        reference_bounds = (
+            float(reference_xyz[:, 0].min() - args.orthophoto_margin),
+            float(reference_xyz[:, 1].min() - args.orthophoto_margin),
+            float(reference_xyz[:, 0].max() + args.orthophoto_margin),
+            float(reference_xyz[:, 1].max() + args.orthophoto_margin),
+        )
         roi_center = np.array([args.center_x, args.center_y])
         reference = crop_xy(reference_fields, reference, roi_center, args.radius)
         direct = crop_xy(direct_fields, direct, roi_center, args.radius)
@@ -144,6 +190,11 @@ class AuditPublisher(Node):
                 len(reference), args.maximum_reference_points, replace=False,
             )
             reference = reference[index]
+        if len(direct) > args.maximum_direct_points:
+            index = np.random.default_rng(37).choice(
+                len(direct), args.maximum_direct_points, replace=False,
+            )
+            direct = direct[index]
         qos = QoSProfile(
             history=HistoryPolicy.KEEP_LAST, depth=1,
             reliability=ReliabilityPolicy.RELIABLE,
@@ -164,6 +215,19 @@ class AuditPublisher(Node):
             self._layer_publishers.append(publisher)
             self._layer_messages.append(message)
             self.get_logger().info(f"Published {len(values)} points on {topic}")
+        if args.orthophoto.is_file():
+            publisher = self.create_publisher(PointCloud2, "/ddlzd/audit/orthophoto", qos)
+            message = orthophoto_message(
+                args.orthophoto, reference_bounds,
+                float(reference_xyz[:, 2].min() - args.orthophoto_z_offset),
+                self.origin, args.orthophoto_stride,
+            )
+            publisher.publish(message)
+            self._layer_publishers.append(publisher)
+            self._layer_messages.append(message)
+            self.get_logger().info(
+                f"Published {message.width} RGB orthophoto samples on /ddlzd/audit/orthophoto"
+            )
         self.get_logger().info(
             f"Local origin: {self.origin[0]:.3f}, {self.origin[1]:.3f}, {self.origin[2]:.3f}; "
             f"ROI center: {args.center_x:.3f}, {args.center_y:.3f}, radius {args.radius:.1f} m"
@@ -175,13 +239,18 @@ def main() -> int:
     parser.add_argument("--standalone", type=Path,
                         help="Display one local-frame PCD without loading audit reference layers")
     parser.add_argument("--reference", type=Path,
-                        default=root / "pcds/696_5328_cropped_ground_only.pcd")
+                        default=root / "pcds/696_5328_cropped_by_bayernatlas_20260812084517.pcd",
+                        help="Georeferenced Bayern reference PCD")
     parser.add_argument("--ground", type=Path,
                         default=root / "pcds/lidar_mapping_accuracy/update_only_ground_map.pcd")
     parser.add_argument("--direct", type=Path,
                         default=root / "pcds/lidar_mapping_accuracy/direct_corrected_pointcloud.pcd")
     parser.add_argument("--changes", type=Path,
                         default=root / "pcds/lidar_mapping_accuracy/change_only_obstacles.pcd")
+    parser.add_argument("--orthophoto", type=Path, default=root / "pcds/696_5328_cropped_by_bayernatlas_20260812084517_satellite_overlay_dop20.png")
+    parser.add_argument("--orthophoto-stride", type=int, default=4)
+    parser.add_argument("--orthophoto-margin", type=float, default=10.0)
+    parser.add_argument("--orthophoto-z-offset", type=float, default=0.35)
     parser.add_argument("--maximum-reference-points", type=int, default=250000)
     parser.add_argument("--maximum-direct-points", type=int, default=1000000)
     parser.add_argument("--center-x", type=float,

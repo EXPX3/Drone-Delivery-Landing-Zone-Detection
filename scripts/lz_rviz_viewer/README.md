@@ -53,7 +53,19 @@ scripts/lz_rviz_viewer/run_mapping_audit_viewer.sh \
 Standalone mode uses local `(0, 0)` as the 100 m ROI center, derives the RViz
 floating-point origin from the cloud, and deterministically displays at most one
 million points. Calling the launcher without an argument retains the original
-four-layer Bayern-assisted audit view.
+four-layer Bayern-assisted audit view and adds the georeferenced Bayern DOP20
+orthophoto as a ground surface. The primary independently toggleable displays are:
+
+- `Bayern DOP20 Orthophoto`;
+- `Bayern Static Map PCD`, loaded from
+  `pcds/696_5328_cropped_by_bayernatlas_20260812084517.pcd`;
+- `Live LiDAR Map PCD (height gradient)`, loaded from
+  `pcds/lidar_mapping_accuracy/direct_corrected_pointcloud.pcd`.
+
+Use their checkboxes in RViz's Displays panel to show any layer alone or all layers
+together. The two PCDs are already in the same georeferenced coordinate frame. The
+viewer applies one shared local rendering origin to all three layers solely to avoid
+float32 precision loss at UTM coordinates.
 
 The primary cloud uses a fixed Z-axis rainbow scale from `-0.5 m` to `2.2 m`
 relative to the displayed cloud origin. This gives near-ground boxes and human-height
