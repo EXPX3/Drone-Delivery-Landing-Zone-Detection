@@ -196,7 +196,15 @@ semantic_segmentation:
     # Covariance-aware 2D chi-square gate (99%, two degrees of freedom), with
     # a hard cap below the measured 5.9 m spacing of distinct cargo boxes.
     vision_proposal_mahalanobis_gate: 9.21
-    vision_proposal_merge_radius_m: 2.5
+    vision_proposal_merge_radius_m: 3.5
+    # Registration/projection systematics are association uncertainty, kept
+    # separate from the empirical localization covariance shown in RViz.
+    vision_proposal_systematic_xy_std_m: 0.75
+    vision_proposal_confirmation_observations:
+      person: 1
+      cargo_box: 3
+      vehicle: 2
+    vision_proposal_tentative_retention_s: 10.0
     vision_proposal_retention_s:
       person: null
       cargo_box: null

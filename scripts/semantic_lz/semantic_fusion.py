@@ -95,11 +95,19 @@ class VisionProposalTracker:
     def __init__(self, association_radius_m: float = 2.0,
                  retention_s: dict[str, float | None] | None = None,
                  smoothing: float = 0.35, merge_radius_m: float = 2.5,
-                 mahalanobis_gate: float = 9.21, history_size: int = 60) -> None:
+                 mahalanobis_gate: float = 9.21, history_size: int = 60,
+                 systematic_xy_std_m: float = 0.75,
+                 confirmation_observations: dict[str, int] | None = None,
+                 tentative_retention_s: float = 10.0) -> None:
         self.association_radius_m = float(association_radius_m)
         self.merge_radius_m = float(merge_radius_m)
         self.mahalanobis_gate = float(mahalanobis_gate)
+        self.systematic_xy_variance = float(systematic_xy_std_m) ** 2
         self.history_size = int(history_size)
+        self.confirmation_observations = confirmation_observations or {
+            "person": 1, "cargo_box": 3, "vehicle": 2,
+        }
+        self.tentative_retention_s = float(tentative_retention_s)
         self.retention_s = retention_s or {
             "person": 2.0, "cargo_box": 3.0, "vehicle": 3.0,
         }
@@ -123,6 +131,7 @@ class VisionProposalTracker:
         covariance = (
             self._regularized_covariance(first["covariance_xy"])
             + self._regularized_covariance(second["covariance_xy"])
+            + np.eye(2) * (2.0 * self.systematic_xy_variance)
         )
         mahalanobis = float(delta @ np.linalg.pinv(covariance) @ delta)
         return euclidean, mahalanobis
@@ -170,6 +179,9 @@ class VisionProposalTracker:
                 item["observations"] += 1
                 item["last_seen_ns"] = int(timestamp_ns)
                 self._refresh_statistics(item)
+                item["confirmed"] = item["observations"] >= int(
+                    self.confirmation_observations.get(item["class_name"], 3)
+                )
                 used.add(index)
             else:
                 item = dict(detection)
@@ -181,6 +193,9 @@ class VisionProposalTracker:
                     "centers": [center.copy()],
                     "measurement_covariance_xy": candidate["covariance_xy"].copy(),
                 })
+                item["confirmed"] = 1 >= int(
+                    self.confirmation_observations.get(item["class_name"], 3)
+                )
                 self._refresh_statistics(item)
                 self.proposals.append(item)
                 used.add(len(self.proposals) - 1)
@@ -221,6 +236,9 @@ class VisionProposalTracker:
                     )
                     keep["last_seen_ns"] = max(keep["last_seen_ns"], merge["last_seen_ns"])
                     self._refresh_statistics(keep)
+                    keep["confirmed"] = keep["observations"] >= int(
+                        self.confirmation_observations.get(keep["class_name"], 3)
+                    )
                     self.proposals = [item for item in self.proposals if item is not merge]
                     changed = True
                     break
@@ -228,12 +246,17 @@ class VisionProposalTracker:
                     break
 
     def active(self, timestamp_ns: int) -> list[dict]:
-        self.proposals = [
-            item for item in self.proposals
-            if self.retention_s.get(item["class_name"], 2.0) is None
-            or (timestamp_ns - int(item["last_seen_ns"])) / 1e9
-            <= float(self.retention_s.get(item["class_name"], 2.0))
-        ]
+        retained = []
+        for item in self.proposals:
+            age_s = (timestamp_ns - int(item["last_seen_ns"])) / 1e9
+            if not item.get("confirmed", False):
+                keep = age_s <= self.tentative_retention_s
+            else:
+                timeout = self.retention_s.get(item["class_name"], 2.0)
+                keep = timeout is None or age_s <= float(timeout)
+            if keep:
+                retained.append(item)
+        self.proposals = retained
         return self.proposals
 
 

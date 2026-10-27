@@ -52,6 +52,28 @@ class SemanticTrackingTests(unittest.TestCase):
         self.assertEqual(tracker.proposals[0]["observations"], 2)
         self.assertGreater(tracker.proposals[0]["covariance_xy"][0, 0], 0.04)
 
+    def test_systematic_projection_offset_merges_tight_duplicate_tracks(self):
+        tracker = VisionProposalTracker(
+            association_radius_m=0.5, merge_radius_m=3.5,
+            systematic_xy_std_m=0.75, retention_s={"cargo_box": None},
+        )
+        first, second = self.proposal(0.0), self.proposal(3.0)
+        first["class_name"] = second["class_name"] = "cargo_box"
+        first["covariance_xy"] = second["covariance_xy"] = np.eye(2) * 0.04
+        tracker.update([first, second], 1_000_000_000)
+        self.assertEqual(len(tracker.proposals), 1)
+
+    def test_unconfirmed_cargo_expires_but_person_is_immediately_permanent(self):
+        tracker = VisionProposalTracker(
+            retention_s={"person": None, "cargo_box": None},
+            tentative_retention_s=10.0,
+        )
+        cargo = self.proposal()
+        cargo["class_name"] = "cargo_box"
+        tracker.update([cargo, self.proposal(5.0)], 1_000_000_000)
+        self.assertEqual(len(tracker.active(12_000_000_000)), 1)
+        self.assertEqual(tracker.proposals[0]["class_name"], "person")
+
     def test_hard_cap_prevents_broad_covariance_merging_distinct_items(self):
         tracker = VisionProposalTracker(
             association_radius_m=2.0, merge_radius_m=2.5,

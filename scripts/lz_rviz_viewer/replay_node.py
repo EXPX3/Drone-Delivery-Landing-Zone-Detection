@@ -299,6 +299,18 @@ class LandingZoneRvizReplay(Node):
                 verification.get("vision_proposal_mahalanobis_gate", 9.21)
             ),
             history_size=int(verification.get("history_size", 60)),
+            systematic_xy_std_m=float(
+                verification.get("vision_proposal_systematic_xy_std_m", 0.75)
+            ),
+            confirmation_observations={
+                str(name): int(value) for name, value in verification.get(
+                    "vision_proposal_confirmation_observations",
+                    {"person": 1, "cargo_box": 3, "vehicle": 2},
+                ).items()
+            },
+            tentative_retention_s=float(
+                verification.get("vision_proposal_tentative_retention_s", 10.0)
+            ),
         )
         self.guided_lidar_tracker = SemanticObjectTracker(
             cluster_radius_m=float(verification.get("cluster_radius_m", 0.75)),
@@ -481,6 +493,7 @@ class LandingZoneRvizReplay(Node):
             proposal_label.text = (
                 f"{proposal['class_name']} | vision provisional "
                 f"#{proposal['proposal_id']} | conf {proposal['confidence']:.2f} "
+                f"| {'confirmed' if proposal['confirmed'] else 'tentative'} "
                 f"| obs {proposal['observations']} | last seen "
                 f"{max(0.0, (timestamp_ns - proposal['last_seen_ns']) / 1e9):.1f}s"
             )
