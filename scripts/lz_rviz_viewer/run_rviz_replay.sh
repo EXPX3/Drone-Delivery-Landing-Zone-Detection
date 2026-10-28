@@ -7,8 +7,15 @@ bag_path="${1:-/media/gvb/ssd24ubuntu/${default_bag_relative}}"
 rate="${2:-1.0}"
 fps="${3:-12.0}"
 semantic_display_mode="${4:-${DDLZD_SEMANTIC_DISPLAY_MODE:-camera_lidar_correlated_only}}"
+orthophoto_mode="${5:-${DDLZD_ORTHOPHOTO:-on}}"
 image="${DDLZD_RVIZ_IMAGE:-cargopack:2026}"
 optimized_poses="${DDLZD_OPTIMIZED_POSES:-${repo_root}/pcds/bag_only_strip_optimized_poses.npz}"
+
+case "${orthophoto_mode}" in
+  on) orthophoto_arg="--show-orthophoto" ;;
+  off) orthophoto_arg="" ;;
+  *) echo "Orthophoto mode must be 'on' or 'off', got: ${orthophoto_mode}" >&2; exit 2 ;;
+esac
 
 if [[ $# -eq 0 && ! -f "${bag_path}/metadata.yaml" ]]; then
   shopt -s nullglob
@@ -48,6 +55,7 @@ fi
 
 printf 'Using ROS 2 bag: %s\n' "${bag_path}"
 printf 'Semantic display tag: %s\n' "${semantic_display_mode}"
+printf 'Bayern orthophoto: %s\n' "${orthophoto_mode}"
 xauthority="${XAUTHORITY:-$HOME/.Xauthority}"
 xauth_args=()
 if [[ -f "${xauthority}" ]]; then
@@ -72,7 +80,7 @@ docker run --rm --name ddlzd-lz-rviz --gpus all --network host --ipc host \
     cp scripts/lz_rviz_viewer/lz_replay.rviz /tmp/ddlzd_lz_replay.rviz
     python3 scripts/lz_rviz_viewer/replay_node.py --bag /bag --rate '${rate}' --fps '${fps}' \
       --optimized-poses /optimized_poses.npz \
-      --semantic-display-mode '${semantic_display_mode}' &
+      --semantic-display-mode '${semantic_display_mode}' ${orthophoto_arg} &
     node_pid=\$!
     ros2 run image_view image_view --ros-args --remap image:=/ddlzd/camera_overlay &
     image_pid=\$!

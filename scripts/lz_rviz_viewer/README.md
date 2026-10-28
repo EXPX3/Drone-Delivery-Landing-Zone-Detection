@@ -17,12 +17,17 @@ cd /home/gvb/Documents/robotspace/DDLZD_ws/Drone-Delivery-Landing-Zone-Detection
 scripts/lz_rviz_viewer/run_rviz_replay.sh
 ```
 
-Optional positional arguments are bag path, playback rate, and visualization FPS:
+Optional positional arguments are bag path, playback rate, visualization FPS,
+semantic display mode, and Bayern orthophoto mode:
 
 ```bash
 scripts/lz_rviz_viewer/run_rviz_replay.sh \
-  /media/gvb/ssd24ubuntu/bags/Bagfilles_Feb13_2026/recovered_bag 1.0 12
+  /media/gvb/ssd24ubuntu/bags/Bagfilles_Feb13_2026/recovered_bag \
+  1.0 12 camera_lidar_correlated_only on
 ```
+
+Use `off` as the fifth argument to skip the orthophoto. With `on` (the default),
+the `Bayern DOP20 Orthophoto` display remains independently toggleable in RViz.
 
 Topics:
 

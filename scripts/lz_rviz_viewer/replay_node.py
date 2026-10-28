@@ -132,6 +132,25 @@ def colored_point_cloud_message(points: np.ndarray, colors: np.ndarray,
     return message
 
 
+def orthophoto_point_cloud(path: Path, bounds: tuple[float, float, float, float],
+                           elevation: float, origin: np.ndarray,
+                           stride: int) -> PointCloud2:
+    image = cv2.imread(str(path), cv2.IMREAD_COLOR)
+    if image is None:
+        raise ValueError(f"Could not read orthophoto: {path}")
+    height, width = image.shape[:2]
+    rows = np.arange(0, height, stride, dtype=np.int32)
+    columns = np.arange(0, width, stride, dtype=np.int32)
+    cc, rr = np.meshgrid(columns, rows)
+    min_x, min_y, max_x, max_y = bounds
+    x = min_x + cc.ravel() / max(1, width - 1) * (max_x - min_x)
+    y = max_y - rr.ravel() / max(1, height - 1) * (max_y - min_y)
+    points = np.column_stack((x, y, np.full(len(x), elevation)))
+    bgr = image[rr.ravel(), cc.ravel()]
+    colors = bgr[:, ::-1]
+    return colored_point_cloud_message(points, colors, origin)
+
+
 def marker(marker_id: int, namespace: str, marker_type: int, color: tuple[float, ...],
            width: float, timestamp_ns: int) -> Marker:
     item = Marker()
@@ -274,6 +293,9 @@ class LandingZoneRvizReplay(Node):
         )
         live = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE)
         self.cloud_pub = self.create_publisher(PointCloud2, "/ddlzd/pointcloud", durable)
+        self.orthophoto_pub = self.create_publisher(
+            PointCloud2, "/ddlzd/orthophoto", durable,
+        )
         self.static_pub = self.create_publisher(MarkerArray, "/ddlzd/landing_zones", durable)
         self.dynamic_pub = self.create_publisher(MarkerArray, "/ddlzd/replay_markers", live)
         self.occupancy_pub = self.create_publisher(MarkerArray, "/ddlzd/occupancy", durable)
@@ -342,6 +364,25 @@ class LandingZoneRvizReplay(Node):
             static_voxel_size_m=float(verification.get("static_voxel_size_m", 0.10)),
         )
         self.cloud_pub.publish(point_cloud_message(cloud, self.origin))
+        if args.show_orthophoto:
+            if not args.orthophoto.is_file():
+                raise FileNotFoundError(f"Bayern orthophoto is missing: {args.orthophoto}")
+            margin = float(args.orthophoto_margin)
+            bounds = (
+                float(full_cloud[:, 0].min() - margin),
+                float(full_cloud[:, 1].min() - margin),
+                float(full_cloud[:, 0].max() + margin),
+                float(full_cloud[:, 1].max() + margin),
+            )
+            orthophoto = orthophoto_point_cloud(
+                args.orthophoto, bounds,
+                float(full_cloud[:, 2].min() - args.orthophoto_z_offset),
+                self.origin, args.orthophoto_stride,
+            )
+            self.orthophoto_pub.publish(orthophoto)
+            self.get_logger().info(
+                f"Published {orthophoto.width} Bayern DOP20 samples on /ddlzd/orthophoto"
+            )
         self.static_pub.publish(self.zone_markers(0))
         self.get_logger().info(
             f"Published {len(cloud)} cloud points, {len(self.zones)} landing zones, and "
@@ -1146,6 +1187,11 @@ def main() -> int:
     parser.add_argument("--bag", type=Path, required=True)
     parser.add_argument("--pcd", type=Path, default=root / "pcds/696_5328_cropped_by_bayernatlas_20260812084517.pcd")
     parser.add_argument("--ground-pcd", type=Path, default=root / "pcds/696_5328_cropped_ground_only.pcd")
+    parser.add_argument("--orthophoto", type=Path, default=root / "pcds/696_5328_cropped_by_bayernatlas_20260812084517_satellite_overlay_dop20.png")
+    parser.add_argument("--show-orthophoto", action="store_true")
+    parser.add_argument("--orthophoto-stride", type=int, default=4)
+    parser.add_argument("--orthophoto-margin", type=float, default=10.0)
+    parser.add_argument("--orthophoto-z-offset", type=float, default=0.35)
     parser.add_argument("--zones", type=Path, default=root / "pcds/region_growing_landing_zones_max10000_radius2_5_to3_risk_ranked.csv")
     parser.add_argument("--config", type=Path, default=root / "scripts/config/lz_camera_projection.yaml")
     parser.add_argument("--max-points", type=int, default=250000)

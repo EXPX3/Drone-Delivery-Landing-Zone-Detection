@@ -48,7 +48,7 @@ Run the default explicitly:
 ```bash
 scripts/semantic_lz/run_semantic_replay.sh \
   /media/gvb/ssd24ubuntu3/bags/Bagfilles_Feb13_2026/recovered_bag \
-  1.0 12 camera_lidar_correlated_only
+  1.0 12 camera_lidar_correlated_only on
 ```
 
 The comparison tag shows both persistent camera-only proposals and
@@ -61,12 +61,24 @@ camera_and_lidar_correlated
 ```bash
 scripts/semantic_lz/run_semantic_replay.sh \
   /media/gvb/ssd24ubuntu3/bags/Bagfilles_Feb13_2026/recovered_bag \
-  1.0 12 camera_and_lidar_correlated
+  1.0 12 camera_and_lidar_correlated on
 ```
 
 The tag can alternatively be supplied through
 `DDLZD_SEMANTIC_DISPLAY_MODE`. It affects visualization only; inference,
 tracking, covariance updates and landing-zone safety logic remain identical.
+
+The fifth argument controls the georeferenced Bayern DOP20 ground layer:
+
+```text
+on   publish and display the orthophoto (default)
+off  skip orthophoto publication
+```
+
+While running, `Bayern DOP20 Orthophoto` can be toggled independently in RViz's
+Displays panel. The image uses the same bounds as the browser landing-zone viewer
+and is rendered `0.35 m` below the minimum Bayern point elevation to avoid depth
+flicker. It is visualization only and does not enter landing-zone decisions.
 
 The semantic model runs every third displayed frame at 1280 pixels. Mapping and
 the geometry-based safety rejection remain independent: an unrecognized obstacle
