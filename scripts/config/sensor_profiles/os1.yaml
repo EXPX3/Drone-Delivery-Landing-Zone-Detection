@@ -1,0 +1,18 @@
+tag: os1
+description: Ouster OS1 ROS 2 recording/replay profile
+
+overrides:
+  topics:
+    lidar_points: /ouster/points
+
+  frames:
+    # Resolve map -> PointCloud2.header.frame_id at runtime. This supports the
+    # driver's configured os_sensor/os_lidar frame without assuming an extrinsic.
+    lidar_chain: auto
+
+  dynamic_occupancy:
+    maximum_lidar_range_m: 120.0
+    # The checked-in optimized poses and LiDAR extrinsic belong to the recorded
+    # Velodyne bag and are invalid for a newly mounted OS1.
+    validated_pose_replay:
+      enabled: false

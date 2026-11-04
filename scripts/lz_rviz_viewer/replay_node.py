@@ -58,6 +58,31 @@ SEMANTIC_DISPLAY_MODES = {
     SEMANTIC_DISPLAY_CORRELATED_ONLY,
     SEMANTIC_DISPLAY_CAMERA_AND_CORRELATED,
 }
+
+
+def merge_config(base: dict, override: dict) -> dict:
+    """Recursively merge a sensor profile without mutating either input."""
+    result = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = merge_config(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
+def message_frame(message: object) -> str:
+    frame = str(getattr(getattr(message, "header", None), "frame_id", "")).lstrip("/")
+    if not frame:
+        raise ValueError("LiDAR PointCloud2 has an empty frame_id")
+    return frame
+
+
+def lidar_tf_chain(config: dict, message: object) -> list[str]:
+    chain = config["frames"].get("lidar_chain", "auto")
+    if chain == "auto":
+        return [str(config["frames"]["map"]), message_frame(message)]
+    return [str(frame) for frame in chain]
 COLORS = {
     "safest": (0.0, 0.50, 0.0, 1.0),
     "safe": (1.0, 0.647, 0.0, 1.0),
@@ -208,6 +233,14 @@ class LandingZoneRvizReplay(Node):
         self.stop = threading.Event()
         with args.config.open(encoding="utf-8") as handle:
             self.config = yaml.safe_load(handle)
+        if args.sensor_profile is not None:
+            with args.sensor_profile.open(encoding="utf-8") as handle:
+                profile = yaml.safe_load(handle) or {}
+            self.config = merge_config(self.config, profile.get("overrides", profile))
+            self.get_logger().info(
+                f"TAG: {profile.get('tag', args.sensor_profile.stem)}; "
+                f"sensor profile {args.sensor_profile}"
+            )
         configured_display = self.config.get("semantic_segmentation", {}).get(
             "display_mode", SEMANTIC_DISPLAY_CORRELATED_ONLY,
         )
@@ -731,7 +764,7 @@ class LandingZoneRvizReplay(Node):
                             ranges = np.linalg.norm(lidar_points, axis=1)
                             lidar_points = lidar_points[(ranges > 1.0) & (ranges <= max_lidar_range)]
                             map_to_lidar = chain_transform(
-                                tf_data, self.config["frames"]["lidar_chain"], timestamp,
+                                tf_data, lidar_tf_chain(self.config, message), timestamp,
                                 float(self.config["synchronization"]["max_tf_gap_s"]),
                             )
                             map_points = transform_points(map_to_lidar, lidar_points)
@@ -1194,6 +1227,8 @@ def main() -> int:
     parser.add_argument("--orthophoto-z-offset", type=float, default=0.35)
     parser.add_argument("--zones", type=Path, default=root / "pcds/region_growing_landing_zones_max10000_radius2_5_to3_risk_ranked.csv")
     parser.add_argument("--config", type=Path, default=root / "scripts/config/lz_camera_projection.yaml")
+    parser.add_argument("--sensor-profile", type=Path,
+                        help="Sensor-specific YAML overrides, for example the OS1 profile")
     parser.add_argument("--max-points", type=int, default=250000)
     parser.add_argument("--fps", type=float, default=12.0)
     parser.add_argument("--rate", type=float, default=1.0)

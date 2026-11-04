@@ -18,16 +18,19 @@ scripts/lz_rviz_viewer/run_rviz_replay.sh
 ```
 
 Optional positional arguments are bag path, playback rate, visualization FPS,
-semantic display mode, and Bayern orthophoto mode:
+semantic display mode, Bayern orthophoto mode, and LiDAR sensor tag:
 
 ```bash
 scripts/lz_rviz_viewer/run_rviz_replay.sh \
   /media/gvb/ssd24ubuntu/bags/Bagfilles_Feb13_2026/recovered_bag \
-  1.0 12 camera_lidar_correlated_only on
+  1.0 12 camera_lidar_correlated_only on recorded_velodyne
 ```
 
 Use `off` as the fifth argument to skip the orthophoto. With `on` (the default),
 the `Bayern DOP20 Orthophoto` display remains independently toggleable in RViz.
+The sixth argument is `recorded_velodyne` by default. Use `os1` only for a bag
+recorded with the OS1 profile; it selects `/ouster/points`, uses the cloud's actual
+frame ID, and disables the incompatible checked-in Velodyne trajectory.
 
 Topics:
 

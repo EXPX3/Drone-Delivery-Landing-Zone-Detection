@@ -24,14 +24,22 @@ def quaternion_matrix(quaternion_xyzw: list[float]) -> np.ndarray:
 def timed_xyz(message: object) -> tuple[np.ndarray, np.ndarray]:
     """Decode XYZ and relative firing time with one shared validity mask."""
     fields = {item.name: item for item in message.fields}
-    if not {"x", "y", "z", "time"}.issubset(fields):
-        raise ValueError("PointCloud2 requires x, y, z and time fields for corrected replay")
-    formats = {7: "<f4", 8: "<f8"}
+    time_name = next((name for name in ("time", "t", "timestamp") if name in fields), None)
+    if not {"x", "y", "z"}.issubset(fields) or time_name is None:
+        raise ValueError(
+            "PointCloud2 requires x, y, z and one relative-time field: time, t, or timestamp"
+        )
+    endian = ">" if bool(getattr(message, "is_bigendian", False)) else "<"
+    formats = {
+        2: endian + "u1", 4: endian + "u2", 6: endian + "u4",
+        7: endian + "f4", 8: endian + "f8",
+    }
+    names = ["x", "y", "z", time_name]
     try:
         dtype = np.dtype({
-            "names": ["x", "y", "z", "time"],
-            "formats": [formats[int(fields[name].datatype)] for name in ("x", "y", "z", "time")],
-            "offsets": [int(fields[name].offset) for name in ("x", "y", "z", "time")],
+            "names": names,
+            "formats": [formats[int(fields[name].datatype)] for name in names],
+            "offsets": [int(fields[name].offset) for name in names],
             "itemsize": int(message.point_step),
         })
     except KeyError as error:
@@ -39,7 +47,7 @@ def timed_xyz(message: object) -> tuple[np.ndarray, np.ndarray]:
     count = int(message.width) * int(message.height)
     values = np.frombuffer(message.data, dtype=dtype, count=count)
     points = np.column_stack((values["x"], values["y"], values["z"])).astype(np.float64)
-    relative_times = np.asarray(values["time"], dtype=np.float64)
+    relative_times = np.asarray(values[time_name], dtype=np.float64)
     valid = np.isfinite(points).all(axis=1) & np.isfinite(relative_times)
     return points[valid], relative_times[valid]
 

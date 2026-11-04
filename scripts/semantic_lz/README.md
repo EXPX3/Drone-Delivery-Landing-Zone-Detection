@@ -1,5 +1,14 @@
 # Dynamic Semantic Obstacle Replay
 
+Repository: `https://github.com/EXPX3/Drone-Delivery-Landing-Zone-Detection`
+
+Implementation branch: `sematic_segment_obstacles_dynamic_lz`
+
+For Ouster OS1 recording/replay compatibility and real-UAV input validation, see
+[`OS1_REAL_UAV_READINESS.md`](OS1_REAL_UAV_READINESS.md). The `os1` sensor tag is
+the sixth replay-launcher argument. Direct onboard live landing-zone processing is
+not provided by the bag-replay node and must not be inferred from this profile.
+
 This branch adds synchronized open-vocabulary image segmentation and transfers
 the image masks onto the corrected LiDAR scan. RViz keeps showing the complete
 static and updated maps; compact physically verified semantic tracks are an
