@@ -9,6 +9,7 @@ fps="${3:-12.0}"
 semantic_display_mode="${4:-${DDLZD_SEMANTIC_DISPLAY_MODE:-camera_lidar_correlated_only}}"
 orthophoto_mode="${5:-${DDLZD_ORTHOPHOTO:-on}}"
 sensor_tag="${6:-${DDLZD_SENSOR_TAG:-recorded_velodyne}}"
+camera_mode="${7:-${DDLZD_CAMERA_MODE:-auto}}"
 image="${DDLZD_RVIZ_IMAGE:-cargopack:2026}"
 optimized_poses="${DDLZD_OPTIMIZED_POSES:-${repo_root}/pcds/bag_only_strip_optimized_poses.npz}"
 
@@ -18,9 +19,21 @@ case "${orthophoto_mode}" in
   *) echo "Orthophoto mode must be 'on' or 'off', got: ${orthophoto_mode}" >&2; exit 2 ;;
 esac
 case "${sensor_tag}" in
-  recorded_velodyne) sensor_profile_arg="" ;;
-  os1) sensor_profile_arg="--sensor-profile /workspace/scripts/config/sensor_profiles/os1.yaml" ;;
+  recorded_velodyne)
+    sensor_profile_arg=""
+    optimized_cli_arg="--optimized-poses /optimized_poses.npz"
+    optimized_mount_args=(-v "${optimized_poses}:/optimized_poses.npz:ro")
+    ;;
+  os1)
+    sensor_profile_arg="--sensor-profile /workspace/scripts/config/sensor_profiles/os1.yaml"
+    optimized_cli_arg=""
+    optimized_mount_args=()
+    ;;
   *) echo "Sensor tag must be 'recorded_velodyne' or 'os1', got: ${sensor_tag}" >&2; exit 2 ;;
+esac
+case "${camera_mode}" in
+  auto|required|off) ;;
+  *) echo "Camera mode must be 'auto', 'required', or 'off', got: ${camera_mode}" >&2; exit 2 ;;
 esac
 
 if [[ $# -eq 0 && ! -f "${bag_path}/metadata.yaml" ]]; then
@@ -48,7 +61,7 @@ EOF
   exit 1
 fi
 
-if [[ ! -f "${optimized_poses}" ]]; then
+if [[ "${sensor_tag}" == recorded_velodyne && ! -f "${optimized_poses}" ]]; then
   cat >&2 <<EOF
 ERROR: The validated corrected-pose archive is missing:
   ${optimized_poses}
@@ -63,6 +76,7 @@ printf 'Using ROS 2 bag: %s\n' "${bag_path}"
 printf 'Semantic display tag: %s\n' "${semantic_display_mode}"
 printf 'Bayern orthophoto: %s\n' "${orthophoto_mode}"
 printf 'LiDAR sensor tag: %s\n' "${sensor_tag}"
+printf 'Camera mode: %s\n' "${camera_mode}"
 xauthority="${XAUTHORITY:-$HOME/.Xauthority}"
 xauth_args=()
 if [[ -f "${xauthority}" ]]; then
@@ -80,17 +94,21 @@ docker run --rm --name ddlzd-lz-rviz --gpus all --network host --ipc host \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   -v "${repo_root}:/workspace" \
   -v "${bag_path}:/bag:ro" \
-  -v "${optimized_poses}:/optimized_poses.npz:ro" \
+  "${optimized_mount_args[@]}" \
   -w /workspace \
   --entrypoint bash "${image}" -lc "
     source /opt/ros/humble/setup.bash
     cp scripts/lz_rviz_viewer/lz_replay.rviz /tmp/ddlzd_lz_replay.rviz
     python3 scripts/lz_rviz_viewer/replay_node.py --bag /bag --rate '${rate}' --fps '${fps}' \
-      --optimized-poses /optimized_poses.npz \
-      --semantic-display-mode '${semantic_display_mode}' ${orthophoto_arg} ${sensor_profile_arg} &
+      ${optimized_cli_arg} \
+      --semantic-display-mode '${semantic_display_mode}' --camera-mode '${camera_mode}' \
+      ${orthophoto_arg} ${sensor_profile_arg} &
     node_pid=\$!
-    ros2 run image_view image_view --ros-args --remap image:=/ddlzd/camera_overlay &
-    image_pid=\$!
-    trap 'kill \$node_pid \$image_pid 2>/dev/null || true' EXIT INT TERM
+    image_pid=''
+    if [[ '${camera_mode}' != off ]]; then
+      ros2 run image_view image_view --ros-args --remap image:=/ddlzd/camera_overlay &
+      image_pid=\$!
+    fi
+    trap 'kill \$node_pid \${image_pid:-} 2>/dev/null || true' EXIT INT TERM
     rviz2 -d /tmp/ddlzd_lz_replay.rviz
   "

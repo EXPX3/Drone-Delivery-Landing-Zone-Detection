@@ -48,8 +48,12 @@ launcher argument:
 
 ```bash
 scripts/lz_rviz_viewer/run_rviz_replay.sh \
-  /path/to/os1_bag 1.0 12 camera_lidar_correlated_only on os1
+  /path/to/os1_bag 1.0 12 camera_lidar_correlated_only on os1 auto
 ```
+
+For an OS1 recording without camera images, use `off` as the seventh argument. In
+`auto`, a missing image topic automatically selects LiDAR-only mapping and landing-zone
+detection. Camera availability never gates geometric occupancy or LZ safety updates.
 
 This profile intentionally uses bag TF rather than the old Velodyne optimized-pose
 archive. A new OS1-specific trajectory and calibration must be generated before

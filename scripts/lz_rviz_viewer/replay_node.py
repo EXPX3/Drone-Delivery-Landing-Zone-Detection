@@ -33,6 +33,7 @@ from lz_camera_projection import (  # noqa: E402
     compose, load_landing_zones, project_optical_points, scaled_camera_matrix,
     transform_from_matrix, transform_points,
 )
+from lz_rviz_viewer.camera_mode import camera_fusion_available  # noqa: E402
 from lz_rviz_viewer.dynamic_occupancy import (  # noqa: E402
     apply_centered_transform, DynamicOccupancyMap, interpolate_gps, pointcloud2_xyz,
     TerrainHeightModel,
@@ -343,13 +344,8 @@ class LandingZoneRvizReplay(Node):
             String, "/ddlzd/semantic_object_uncertainty", live,
         )
         semantic = self.config.get("semantic_segmentation", {})
+        self.semantic_config = semantic
         self.segmenter = None
-        if bool(semantic.get("enabled", False)):
-            self.segmenter = OpenVocabularySegmenter(
-                self.args.semantic_weights, list(semantic["prompts"]),
-                confidence=float(semantic["confidence"]),
-                image_size=int(semantic["image_size"]), device=str(semantic["device"]),
-            )
         verification = semantic.get("vision_guided_lidar", {})
         self.vision_proposal_tracker = VisionProposalTracker(
             association_radius_m=float(
@@ -704,10 +700,28 @@ class LandingZoneRvizReplay(Node):
             topic_types = {item.name: item.type for item in reader.get_all_topics_and_types()}
             image_topic = self.config["topics"]["image"]
             lidar_topic = self.config["topics"]["lidar_points"]
-            image_type = get_message(topic_types[image_topic])
+            if lidar_topic not in topic_types:
+                raise RuntimeError(f"Bag is missing required LiDAR topic: {lidar_topic}")
+            camera_available = camera_fusion_available(
+                topic_types, image_topic, self.args.camera_mode,
+            )
+            image_type = get_message(topic_types[image_topic]) if camera_available else None
             lidar_type = get_message(topic_types[lidar_topic])
-            native_k = np.asarray(self.config["camera"]["matrix"], dtype=np.float64)
-            distortion = np.asarray(self.config["camera"]["distortion"], dtype=np.float64)
+            native_k = (np.asarray(self.config["camera"]["matrix"], dtype=np.float64)
+                        if camera_available else None)
+            distortion = (np.asarray(self.config["camera"]["distortion"], dtype=np.float64)
+                          if camera_available else None)
+            if camera_available and bool(self.semantic_config.get("enabled", False)):
+                self.segmenter = OpenVocabularySegmenter(
+                    self.args.semantic_weights, list(self.semantic_config["prompts"]),
+                    confidence=float(self.semantic_config["confidence"]),
+                    image_size=int(self.semantic_config["image_size"]),
+                    device=str(self.semantic_config["device"]),
+                )
+            self.get_logger().info(
+                "Camera fusion enabled" if camera_available
+                else "Camera unavailable/disabled: running LiDAR-only mapping and LZ detection"
+            )
             first_stamp = last_publish = None
             last_occupancy_publish = None
             last_zone_publish = None
@@ -740,6 +754,16 @@ class LandingZoneRvizReplay(Node):
                     scan_started = time.perf_counter()
                     message = deserialize_message(raw, lidar_type)
                     timestamp = stamp_ns(message, bag_time)
+                    if first_stamp is None:
+                        first_stamp = timestamp
+                    if (self.args.max_bag_seconds is not None
+                            and timestamp - first_stamp > self.args.max_bag_seconds * 1e9):
+                        break
+                    if not camera_available:
+                        desired = (timestamp - first_stamp) / 1e9 / self.args.rate
+                        delay = desired - (time.monotonic() - wall_start)
+                        if delay > 0:
+                            time.sleep(delay)
                     try:
                         if self.validated_replay is not None:
                             if not corrected_alignment_ready:
@@ -834,7 +858,7 @@ class LandingZoneRvizReplay(Node):
                         )
                         self.get_logger().info(f"LiDAR timing mean/P95: {report}")
                     continue
-                if topic != image_topic:
+                if not camera_available or topic != image_topic:
                     continue
                 message = deserialize_message(raw, image_type)
                 timestamp = stamp_ns(message, bag_time)
@@ -1229,6 +1253,8 @@ def main() -> int:
     parser.add_argument("--config", type=Path, default=root / "scripts/config/lz_camera_projection.yaml")
     parser.add_argument("--sensor-profile", type=Path,
                         help="Sensor-specific YAML overrides, for example the OS1 profile")
+    parser.add_argument("--camera-mode", choices=("auto", "required", "off"), default="auto",
+                        help="auto uses images when present; off guarantees LiDAR-only operation")
     parser.add_argument("--max-points", type=int, default=250000)
     parser.add_argument("--fps", type=float, default=12.0)
     parser.add_argument("--rate", type=float, default=1.0)

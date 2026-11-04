@@ -9,6 +9,11 @@ For Ouster OS1 recording/replay compatibility and real-UAV input validation, see
 the sixth replay-launcher argument. Direct onboard live landing-zone processing is
 not provided by the bag-replay node and must not be inferred from this profile.
 
+Camera input is optional for replay. Camera mode `auto` uses segmentation and
+camera-LiDAR fusion when images exist; `off` runs geometric LiDAR mapping and
+landing-zone detection without loading the vision model. The camera never gates the
+LiDAR safety path.
+
 This branch adds synchronized open-vocabulary image segmentation and transfers
 the image masks onto the corrected LiDAR scan. RViz keeps showing the complete
 static and updated maps; compact physically verified semantic tracks are an
