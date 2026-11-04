@@ -10,10 +10,16 @@ All live output for a replay step uses the same ROS image timestamp.
 RViz renders the 3D scene, while the native ROS `image_view` process displays the
 camera topic in a separate lightweight window.
 
-Launch with the existing `cargopack:2026` image:
+For a fresh clone or a different computer, start with
+[`../semantic_lz/PORTABLE_SETUP.md`](../semantic_lz/PORTABLE_SETUP.md). The large
+point clouds, orthophoto, solution CSV, model weights, and validated Docker image are
+not stored in Git.
+
+Launch with the installed `cargopack:2026` image from any clone location:
 
 ```bash
-cd /home/gvb/Documents/robotspace/DDLZD_ws/Drone-Delivery-Landing-Zone-Detection
+cd /path/to/Drone-Delivery-Landing-Zone-Detection
+export DDLZD_BAG=/absolute/path/to/ros2_bag
 scripts/lz_rviz_viewer/run_rviz_replay.sh
 ```
 
@@ -49,8 +55,8 @@ Topics:
 The point cloud is limited to 250,000 deterministic samples by default and shifted
 to a local XY origin to avoid float32 precision loss in RViz. The camera image carries
 the replay frame, bag-relative time, and original ROS timestamp.
-The launcher enables NVIDIA PRIME OpenGL offload for responsive orbit and wheel zoom
-on the hybrid RTX laptop. The LiDAR map is static by design; the UAV, trajectory,
+The launcher uses NVIDIA acceleration when the driver and Docker runtime are both
+available; set `DDLZD_GPU=off` for CPU rendering. The LiDAR map is static by design; the UAV, trajectory,
 camera frustum, footprint, and pink visible-zone layer update during replay.
 
 The first launch still scans the bag to reconstruct TF/GNSS registration. Once replay

@@ -1,6 +1,11 @@
 
 # Drone-Delivery-Landing-Zone-Detection: Algorithms & Benchmarking Framework 
 
+> The dynamic OS1/LiDAR landing-zone replay is maintained on branch
+> `sematic_segment_obstacles_dynamic_lz`. For reproduction on another computer,
+> including Docker and large-data requirements, see
+> [`scripts/semantic_lz/PORTABLE_SETUP.md`](scripts/semantic_lz/PORTABLE_SETUP.md).
+
 
 This repository focuses on two core components:
 - 🧠 **Drone-Delivery-Landing-Zone-Detection (DLZD) Algorithms**

@@ -14,6 +14,9 @@ camera-LiDAR fusion when images exist; `off` runs geometric LiDAR mapping and
 landing-zone detection without loading the vision model. The camera never gates the
 LiDAR safety path.
 
+For setup on another computer, including the non-Git artifacts and runtime image,
+follow [`PORTABLE_SETUP.md`](PORTABLE_SETUP.md) before using the commands below.
+
 This branch adds synchronized open-vocabulary image segmentation and transfers
 the image masks onto the corrected LiDAR scan. RViz keeps showing the complete
 static and updated maps; compact physically verified semantic tracks are an
@@ -34,7 +37,7 @@ reject a candidate.
 Prepare the reproducible GPU image and model files once:
 
 ```bash
-cd /home/gvb/Documents/robotspace/DDLZD_ws/Drone-Delivery-Landing-Zone-Detection
+cd /path/to/Drone-Delivery-Landing-Zone-Detection
 scripts/semantic_lz/prepare_models.sh
 ```
 

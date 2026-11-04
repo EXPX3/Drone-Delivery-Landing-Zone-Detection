@@ -14,15 +14,19 @@ This does **not** make `replay_node.py` a live flight node. It still opens a com
 ROS 2 bag and fits geographic registration from recorded TF/GPS. Do not use it for
 real-time landing decisions on the aircraft.
 
+For installation on a second computer, Docker image transfer, required untracked
+artifacts, GPU/CPU behavior, and site-specific configuration, follow
+[`PORTABLE_SETUP.md`](PORTABLE_SETUP.md).
+
 ## Required Real-UAV Inputs
 
 Before recording or implementing direct live operation, provide:
 
 - `/ouster/points` with `x`, `y`, `z`, and `t` (or `time`) fields;
 - a measured static transform from `base_link` to the cloud frame;
-- synchronized `/tf`, `/tf_static`, GNSS, and camera image topics;
-- measured OS1-to-body and camera-to-body extrinsics;
-- camera intrinsics for the deployed resolution;
+- synchronized `/tf`, `/tf_static`, GNSS, and optional camera image topics;
+- measured OS1-to-body extrinsics and, when camera fusion is used, camera extrinsics;
+- camera intrinsics for the deployed resolution when camera fusion is used;
 - a common clock source, preferably PTP/GPS, for OS1, camera, and flight computer.
 
 Run the preflight checker on the UAV computer while all sensors are publishing:
@@ -34,12 +38,15 @@ python3 scripts/semantic_lz/os1_preflight.py \
   --image-topic /GremsyVIO/image/cpu \
   --gps-topic /mavros/global_position/global \
   --base-frame base_link \
+  --camera-mode required \
   --duration 15 \
   --output /tmp/ddlzd_os1_preflight.json
 ```
 
-The command returns `0` only when point fields, timestamps, TF, camera, and finite GPS
-are all observed. Topic and frame arguments must be changed to the deployed names.
+With `--camera-mode required`, the command returns `0` only when point fields,
+timestamps, TF, camera, and finite GPS are all observed. Use `--camera-mode off` for
+a camera-free aircraft or `auto` to report camera availability without making it a
+LiDAR-readiness requirement. Topic and frame arguments must match the deployment.
 
 ## OS1 Bag Replay
 

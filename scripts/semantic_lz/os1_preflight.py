@@ -33,7 +33,10 @@ class Os1Preflight(Node):
         self.create_subscription(
             PointCloud2, args.points_topic, self.on_cloud, qos_profile_sensor_data,
         )
-        self.create_subscription(Image, args.image_topic, self.on_image, qos_profile_sensor_data)
+        if args.camera_mode != "off":
+            self.create_subscription(
+                Image, args.image_topic, self.on_image, qos_profile_sensor_data,
+            )
         self.create_subscription(NavSatFix, args.gps_topic, self.on_gps, qos_profile_sensor_data)
 
     def on_cloud(self, message: PointCloud2) -> None:
@@ -75,14 +78,23 @@ class Os1Preflight(Node):
             "nonempty_frame_id": bool(self.cloud_frame),
             "base_to_lidar_tf": tf_ready,
             "monotonic_cloud_timestamps": monotonic_stamps,
-            "camera_images_received": self.image_count > 0,
             "finite_gps_received": self.gps_count > 0 and self.gps_finite,
         }
+        camera_observed = self.image_count > 0
+        checks["camera_images_received"] = camera_observed
+        required_checks = [
+            "point_cloud_received", "xyz_fields", "relative_time_field",
+            "nonempty_frame_id", "base_to_lidar_tf",
+            "monotonic_cloud_timestamps", "finite_gps_received",
+        ]
+        if self.args.camera_mode == "required":
+            required_checks.append("camera_images_received")
         return {
             "tag": "os1",
-            "ready": all(checks.values()),
+            "ready": all(checks[name] for name in required_checks),
             "duration_s": self.args.duration,
             "checks": checks,
+            "required_checks": required_checks,
             "observations": {
                 "cloud_topic": self.args.points_topic,
                 "cloud_frame": self.cloud_frame,
@@ -91,6 +103,8 @@ class Os1Preflight(Node):
                 "cloud_messages": self.cloud_count,
                 "cloud_rate_hz": self.cloud_count / duration,
                 "image_messages": self.image_count,
+                "camera_mode": self.args.camera_mode,
+                "camera_available": camera_observed,
                 "gps_messages": self.gps_count,
                 "base_frame": self.args.base_frame,
             },
@@ -101,6 +115,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--points-topic", default="/ouster/points")
     parser.add_argument("--image-topic", default="/GremsyVIO/image/cpu")
+    parser.add_argument(
+        "--camera-mode", choices=("auto", "required", "off"), default="auto",
+        help="auto reports camera availability; required makes it a readiness requirement",
+    )
     parser.add_argument("--gps-topic", default="/mavros/global_position/global")
     parser.add_argument("--base-frame", default="base_link")
     parser.add_argument("--duration", type=float, default=15.0)
