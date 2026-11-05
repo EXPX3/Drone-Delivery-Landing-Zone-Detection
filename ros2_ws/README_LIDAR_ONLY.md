@@ -1,156 +1,159 @@
-# Live Ouster LiDAR-only landing-zone demo
+# Live LiDAR landing-zone selection
 
-This branch runs the complete landing-zone pipeline from an Ouster `PointCloud2` stream. It has no camera, OpenCV, or `cv_bridge` dependency. Every candidate is an exact 2.5 m-radius horizontal footprint and is classified from point-cloud geometry:
+This implementation is on branch `live_demo_cp_lidar_only`. It uses a fixed,
+downward-facing LiDAR and has no camera, Gremsy, descent, or flight-control
+command path. Its only navigation output is the selected horizontal location as
+local ENU offset and WGS84 latitude/longitude.
 
-- `SAFEST` (green): risk score `<= 0.33` after temporal stabilization.
-- `SAFE` (orange): risk score `<= 0.62` after temporal stabilization.
-- `RISKY` (red): score above `0.62`, or a hard geometry rejection.
-- `UNKNOWN` (gray): insufficient observed clearance or too few stable observations.
+## Modes
 
-The geometry score combines obstacle count (27%), clearance (23%), relief (17%), roughness (13%), slope (12%), and footprint coverage (8%). All detector, risk, timing, and tracking parameters are centralized in `src/ddlzd_ros/config/live_fusion.yaml`.
+- `ranking` / `1`: continually show every candidate in final risk order.
+- `sticky` / `2`: select the lowest-risk confirmed `SAFEST` or `SAFE` candidate,
+  keep it bright while other candidates are dim, tolerate short detection
+  dropouts, and replace it after a hard rejection or sustained risk degradation.
 
-## Requirements
+Candidates are `SAFEST`, `SAFE`, `RISKY`, or `UNKNOWN`. `UNKNOWN` means pending
+temporal confirmation or insufficient clearance evidence; it is visible for
+diagnosis but is never selectable. Each result also carries the explicit
+evidence state `PENDING`, `CONFIRMED`, `INSUFFICIENT`, or `INVALID`.
 
-- Jetson/aarch64 compatible with the NVIDIA Isaac ROS Humble base image.
-- Docker, NVIDIA Container Runtime, and X11 access for RViz.
-- Reachable Ouster OS1.
-- Gravity-aligned `map`/`odom` target frame and timestamped Ouster TF.
-- With `input_is_motion_compensated:=false`, Ouster's per-point `t` field.
+The published `rank` is computed after the complete geometry risk score. Lower
+risk is better; unscored candidates are last. The score combines obstacles,
+obstacle clearance, relief, roughness, slope, and observed coverage.
 
-## Build and run Docker
+## Supported sensor profiles
+
+| Selection | Live cloud | Point time | Driver |
+|---|---|---|---|
+| `vlp16` | `/velodyne_points` | `time`, float32 seconds | ROS Velodyne |
+| `os1_rev7` | `/ouster/points` | `t`, uint32 nanoseconds | pinned Ouster ROS; `LEGACY` UDP profile for FW 3.1 |
+| `os1_rev8` | `/ouster/points` | `t`, uint32 nanoseconds | pinned Ouster ROS 0.15.1 |
+
+The profile configures both the upstream live driver and downstream cloud
+schema. Live use requires an explicit sensor. Bag use defaults to `auto`: VLP16
+can be proven from its fields, while Ouster revision requires recorded metadata
+with a recognizable hardware part number. If it cannot be proven, launch stops
+and requires `--sensor os1_rev7` or `--sensor os1_rev8`; it never guesses from a
+topic name or firmware version.
+
+## Frame and telemetry contract
+
+- `target_frame` must be a gravity-aligned local ENU frame: X east, Y north, Z up.
+- A timestamped TF from each LiDAR cloud frame into `target_frame` is mandatory.
+- The fixed LiDAR extrinsic must be supplied by the vehicle TF tree, or explicitly
+  with `--static-lidar-transform`; no downward mounting angle is assumed.
+- The pose and GNSS topics must describe the same vehicle reference at comparable
+  timestamps. Defaults are `/mavros/local_position/pose` and
+  `/mavros/global_position/global`.
+
+For a valid sticky selection, the node subtracts the synchronized vehicle ENU
+position from the candidate ENU position and applies that east/north displacement
+to the synchronized GNSS fix using the WGS84 geodesic. GNSS status, timing, and
+configured covariance limits are checked before publication.
+
+## Build
 
 From the repository root:
 
 ```bash
-docker build --file docker/Dockerfile.live_demo_cargopack --tag ddlzd-lidar-only:humble .
-sudo ./docker/configure_ouster_network.sh
-xhost +local:root +local:docker
-docker run --rm -it \
-  --name ddlzd-lidar-only \
-  --privileged --runtime nvidia --network host --ipc host \
-  -e DISPLAY -e XAUTHORITY \
-  -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
-  -v "$(pwd)/ros2_ws/src/ddlzd_ros/config/live_fusion.yaml:/config/live_fusion.yaml:ro" \
-  ddlzd-lidar-only:humble
+docker build -f docker/Dockerfile.live_demo_cargopack -t ddlzd-lidar-only:humble .
 ```
 
-The entrypoint sources ROS 2 Humble and `/ros2_ws/install/setup.bash`.
+The image builds the pinned Rev8-capable Ouster driver, the Velodyne driver, and
+the detector workspace.
 
-## One-command Ouster + detector + RViz launch
+## Run live
 
-Inside the container:
-
-```bash
-ros2 launch ddlzd_ros live_ouster_gremsy.launch.py \
-  sensor_hostname:=192.168.1.10 \
-  lidar_mode:=1024x10 \
-  timestamp_mode:=TIME_FROM_ROS_TIME \
-  target_frame:=map \
-  config_file:=/config/live_fusion.yaml \
-  use_rviz:=true
-```
-
-The retained launch filename preserves compatibility; it contains no Gremsy/RGB components. It starts the Ouster driver, point-cloud/IMU processors, lifecycle detector, automatic configure/activate transitions, and RViz. Use `TIME_FROM_PTP_1588` only when the sensor and TF are on the same synchronized PTP clock. For a direct link-local Ouster connection without PTP, use `TIME_FROM_ROS_TIME`; `TIME_FROM_INTERNAL_OSC` can make the detector reject clouds as stale because the sensor clock is not comparable with ROS wall time.
-
-Tested Jetson direct-link example:
+For the current Ethernet-connected Ouster rig, `eno1` must retain the host
+address `169.254.50.1/16`. Before a full-rate run, apply the host UDP buffer
+tuning once after boot:
 
 ```bash
 sudo ./docker/configure_ouster_network.sh
-DISPLAY=:1 xhost +local:root +local:docker
-docker run -d --name ddlzd-lidar-only --rm \
-  --privileged --runtime nvidia --network host --ipc host \
-  -e DISPLAY=:1 -e XAUTHORITY= \
-  -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
-  -v /home/giri/Documents/robotspace/DDLZD_WS/ros2_ws/src/ddlzd_ros/config/live_fusion.yaml:/config/live_fusion.yaml:ro \
-  ddlzd-lidar-only:humble \
-  ros2 launch ddlzd_ros live_ouster_gremsy.launch.py \
-    sensor_hostname:=169.254.210.24 \
-    lidar_mode:=1024x10 \
-    timestamp_mode:=TIME_FROM_ROS_TIME \
-    target_frame:=os_sensor \
-    config_file:=/config/live_fusion.yaml \
-    use_rviz:=true
 ```
 
-Stop the launched demo completely:
+Mode 1 with a VLP16:
 
 ```bash
-docker rm -f ddlzd-lidar-only
+./docker/run_landing_zones.sh live \
+  --sensor vlp16 --velodyne-ip 192.168.1.201 \
+  --mode 1 --target-frame map
 ```
 
-## After changing detector YAML
-
-The tested Jetson launch command bind-mounts `ros2_ws/src/ddlzd_ros/config/live_fusion.yaml` into the container as `/config/live_fusion.yaml`. After changing values such as `obstacle_height_m` or `obstacle_min_points`, restart the container; no Docker rebuild is needed for YAML-only changes:
+Mode 2 with the current OS1-128 Rev7:
 
 ```bash
-docker rm -f ddlzd-lidar-only
+./docker/run_landing_zones.sh live \
+  --sensor os1_rev7 --sensor-hostname 169.254.210.24 \
+  --mode 2 --target-frame map
 ```
 
-Then rerun the tested Jetson launch command above. Rebuild the Docker image only after changing C++ source, launch files, RViz config, package metadata, or Docker dependencies.
+For the new hardware, change only `--sensor os1_rev8` and its hostname. The
+default Ouster clock setting is `TIME_FROM_ROS_TIME`; use another setting only
+when sensor, TF, pose, and GNSS timestamps share that clock.
 
-`obstacle_min_points` is a minimum reject threshold. Set `obstacle_min_points: 0` for strict no-obstacle mode, which rejects a candidate when any downsampled point inside the landing footprint is higher than `obstacle_height_m` above the fitted plane. With `obstacle_height_m: 0.0`, any point above the fitted plane counts as an obstacle; this is intentionally aggressive and may reject nearly all candidates in noisy live data.
-
-The detector treats the Z axis of `target_frame` as "up" when fitting horizontal landing planes and measuring points above a candidate. The tested direct-link command uses `target_frame:=os_sensor`; use a gravity-aligned frame such as `map` or `odom` if available for physically meaningful slope and obstacle-height checks.
-
-## Current Ouster sensor settings
-
-- Sensor: `OS-1-128`, SN `122608004931` - 128-channel Ouster lidar currently running.
-- IP: `169.254.210.24` - sensor address on the link-local lidar network.
-- UDP destination: `169.254.50.1` - Jetson interface receiving lidar packets.
-- Lidar mode: `1024x10` - 1024 columns per scan at 10 Hz.
-- Lidar UDP profile: `RNG19_RFL8_SIG16_NIR16` - range, reflectivity, signal, and near-IR fields are streamed.
-- IMU UDP profile: `LEGACY` - standard Ouster IMU packet format.
-- Lidar UDP port: `41229` - current auto-assigned lidar data port.
-- IMU UDP port: `45166` - current auto-assigned IMU data port.
-- Columns per packet: `16` - each UDP packet carries 16 lidar columns.
-- Return order: `STRONGEST_TO_WEAKEST` - strongest return is prioritized first.
-- Timestamp mode on sensor: `TIME_FROM_INTERNAL_OSC` - sensor hardware config uses its internal oscillator.
-- Launch timestamp mode used for working demo: `TIME_FROM_ROS_TIME` - ROS driver stamped messages with ROS time to avoid stale-cloud rejection.
-- Operating mode: `NORMAL` - sensor is actively scanning.
-- Azimuth window: `0-360 deg` - full 360-degree scan enabled.
-- Minimum range threshold: `50 cm` - points closer than 0.5 m are filtered by sensor setting.
-- Signal multiplier: `1` - default signal scaling.
-- Phase lock: `disabled` - no phase locking active.
-- Sync/NMEA input: active-high, NMEA `9600 baud` - external timing inputs are configured but not used for the working demo.
-
-## Use an existing live cloud or bag
+If the calibrated fixed transform is not already published, add six values in
+metres/radians:
 
 ```bash
-ros2 launch ddlzd_ros live_fusion_only.launch.py \
-  point_cloud_topic:=/ouster/points \
-  target_frame:=map \
-  input_is_motion_compensated:=false \
-  config_file:=/config/live_fusion.yaml \
-  use_rviz:=true
+--base-frame base_link --static-lidar-transform X Y Z ROLL PITCH YAW
 ```
 
-Set `input_is_motion_compensated:=true` only for an already-deskewed cloud. The Docker examples mount the editable host YAML at `/config/live_fusion.yaml`; use `config_file:=/config/live_fusion.yaml` so YAML-only changes take effect after a container restart.
+## Run a bag
 
-## Outputs and checks
-
-RViz shows the registered cloud and live colored 2.5 m candidate circles. Topics:
-
-- `/landing_zone/live_landing_zone/local_cloud`
-- `/landing_zone/live_landing_zone/markers`
-- `/landing_zone/live_landing_zone/zones`
-- `/diagnostics`
+Automatic sensor resolution:
 
 ```bash
-ros2 lifecycle get /landing_zone/live_landing_zone
-ros2 topic hz /ouster/points
-ros2 topic hz /landing_zone/live_landing_zone/local_cloud
-ros2 topic echo /landing_zone/live_landing_zone/zones --once
-ros2 topic echo /diagnostics --once
-ros2 run tf2_ros tf2_echo map os_sensor
+./docker/run_landing_zones.sh bag \
+  --bag /absolute/path/to/bag --sensor auto \
+  --mode 2 --target-frame map
 ```
 
-Missing TF, stale clouds, incomplete clearance coverage, and invalid parameters fail closed rather than producing favorable zones.
-
-## Build and test the ROS workspace
-
-From `ros2_ws` in ROS 2 Humble:
+Explicit resolution when the bag lacks Ouster hardware metadata:
 
 ```bash
+./docker/run_landing_zones.sh bag \
+  --bag /absolute/path/to/bag --sensor os1_rev7 \
+  --point-cloud-topic /ouster/points \
+  --mode 2 --target-frame map
+```
+
+Bag playback uses `/clock`. A cloud sequence is processed only once, so pausing
+the bag cannot falsely increase temporal stability.
+
+Press `Ctrl-C` to stop either workflow; the foreground launch and container are
+stopped gracefully.
+
+## Outputs
+
+- `/landing_zone/live_landing_zone/zones`: fully ranked candidates and evidence.
+- `/landing_zone/live_landing_zone/markers`: ranked or sticky visualization.
+- `/landing_zone/live_landing_zone/selected`: selection state, local pose,
+  vehicle-relative ENU, GNSS validity, latitude, longitude, and GNSS uncertainty.
+- `/landing_zone/live_landing_zone/selected_gnss`: standard
+  `geographic_msgs/GeoPointStamped`, published only for a valid locked selection.
+- `/diagnostics`: fail-closed input, TF, and processing status.
+
+No selected GNSS target is published in ranking mode, during a dropout/coasting
+state, or when synchronized telemetry and GNSS validity checks fail.
+
+## Native ROS launch entry points
+
+The wrapper calls these launches and exposes the same values as ROS arguments:
+
+```bash
+ros2 launch ddlzd_ros live_lidar.launch.py sensor_model:=vlp16 ...
+ros2 launch ddlzd_ros bag_landing_zones.launch.py bag_path:=/bag ...
+ros2 launch ddlzd_ros live_fusion_only.launch.py sensor_model:=os1_rev7 ...
+```
+
+`live_ouster_gremsy.launch.py` remains only as an Ouster compatibility wrapper;
+despite its historical filename, it starts no Gremsy or camera component.
+
+## Build and test without Docker
+
+```bash
+cd ros2_ws
 source /opt/ros/humble/setup.bash
 rosdep install --from-paths src --ignore-src -r -y
 colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release

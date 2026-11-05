@@ -9,6 +9,7 @@ find_package(std_msgs REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/LandingZone.msg"
   "msg/LandingZoneArray.msg"
+  "msg/SelectedLandingZone.msg"
   DEPENDENCIES geometry_msgs std_msgs
 )
 

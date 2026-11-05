@@ -1,0 +1,8 @@
+/landing_zone/live_landing_zone:
+  ros__parameters:
+    sensor:
+      model: os1_rev8
+      point_time_field: t
+      point_time_datatype: uint32
+      point_time_scale_sec: 1.0e-9
+    point_cloud_topic: /ouster/points

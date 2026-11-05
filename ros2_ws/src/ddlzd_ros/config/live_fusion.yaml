@@ -1,8 +1,11 @@
-# Central configuration for the LiDAR-only live demo. Launch arguments provide
-# only hardware bindings (topic, target frame, Ouster address and clock mode).
+# Shared algorithm configuration. A sensor profile is layered on top by the
+# live or bag launch file; hardware bindings remain launch arguments.
 /landing_zone/live_landing_zone:
   ros__parameters:
-    # Hardware topics and target_frame are supplied by required launch arguments.
+    operating_mode: ranking
+    local_frame_convention: enu
+    local_pose_topic: /mavros/local_position/pose
+    gnss_topic: /mavros/global_position/global
     input_is_motion_compensated: false
     deskew_tf_sampling_sec: 0.002
     rolling_window_sec: 3.0
@@ -58,4 +61,21 @@
       match_distance_m: 1.0
       timeout_sec: 2.0
       risk_filter_alpha: 0.35
+      position_filter_alpha: 0.35
       minimum_stable_observations: 3
+
+    selection:
+      dropout_timeout_sec: 1.5
+      max_missed_detections: 3
+      soft_release_observations: 2
+
+    gnss:
+      sync_tolerance_sec: 0.50
+      sample_retention_sec: 5.0
+      require_known_covariance: false
+      max_horizontal_uncertainty_m: 10.0
+
+    visualization:
+      ranking_alpha: 0.90
+      sticky_background_alpha: 0.22
+      selected_alpha: 1.0

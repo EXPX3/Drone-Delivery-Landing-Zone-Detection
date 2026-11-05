@@ -57,3 +57,6 @@ DepthCapture_*.png
 RenderOption_*.json
 ScreenCamera_*.json
 ScreenCapture_*.png
+
+# Ouster driver metadata generated at runtime
+**/*-metadata.json

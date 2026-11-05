@@ -3,14 +3,22 @@ uint8 SAFEST=1
 uint8 SAFE=2
 uint8 RISKY=3
 
+uint8 EVIDENCE_PENDING=0
+uint8 EVIDENCE_CONFIRMED=1
+uint8 EVIDENCE_INSUFFICIENT=2
+uint8 EVIDENCE_INVALID=3
+
 uint64 id
+uint32 rank
 geometry_msgs/Pose pose
 geometry_msgs/Vector3 normal
 float32 radius
 float32 risk_score
 uint8 category
+uint8 evidence_state
 bool geometry_valid
 bool temporally_stable
+bool selected
 uint32 consecutive_observations
 
 float32 slope_deg

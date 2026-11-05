@@ -6,6 +6,13 @@ This repository focuses on two core components:
 - 🧠 **Drone-Delivery-Landing-Zone-Detection (DLZD) Algorithms**
 - 📊 **Proposed Benchmarking Strategy** for evaluating those algorithms
 
+## Live multi-LiDAR landing-zone selection
+
+Branch `live_demo_cp_lidar_only` contains the ROS 2 live/bag pipeline for VLP16,
+OS1 Rev7, and OS1 Rev8, including ranked and sticky-selection modes plus selected
+WGS84 coordinates. It uses a calibrated fixed LiDAR transform and contains no
+Gremsy or landing command path. See [ros2_ws/README_LIDAR_ONLY.md](ros2_ws/README_LIDAR_ONLY.md).
+
 ---
 
 ## 📁 Benchmarking Framework Configuration

@@ -1,0 +1,8 @@
+/landing_zone/live_landing_zone:
+  ros__parameters:
+    sensor:
+      model: vlp16
+      point_time_field: time
+      point_time_datatype: float32
+      point_time_scale_sec: 1.0
+    point_cloud_topic: /velodyne_points

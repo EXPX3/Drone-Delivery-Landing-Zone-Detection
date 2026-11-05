@@ -2,30 +2,63 @@ FROM nvcr.io/nvidia/isaac/ros:aarch64-ros2_humble_77e6a678c2058abf96bedcb8f7dd43
 
 SHELL ["/bin/bash", "-lc"]
 
-RUN apt-get update --allow-releaseinfo-change && apt-get install -y --no-install-recommends \
+RUN if [[ -f /etc/apt/sources.list.d/yarn.list ]]; then \
+      mv /etc/apt/sources.list.d/yarn.list /etc/apt/sources.list.d/yarn.list.disabled; \
+    fi \
+ && apt-get update --allow-releaseinfo-change \
+ && apt-get install -y --no-install-recommends \
     build-essential \
+    git \
     libeigen3-dev \
+    libgeographic-dev \
     libpcl-dev \
     python3-colcon-common-extensions \
     ros-humble-diagnostic-msgs \
-    ros-humble-ouster-ros \
+    ros-humble-geographic-msgs \
     ros-humble-pcl-conversions \
     ros-humble-pcl-ros \
     ros-humble-rmw-cyclonedds-cpp \
     ros-humble-rviz2 \
     ros-humble-tf2-eigen \
+    ros-humble-tf2-geometry-msgs \
     ros-humble-tf2-ros \
     ros-humble-tf2-sensor-msgs \
+    ros-humble-velodyne \
     ros-humble-visualization-msgs
 
 ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 WORKDIR /ros2_ws
-COPY ros2_ws/src /ros2_ws/src
+
+# Ouster ROS 0.15.1 is pinned because it adds OS Rev8 support.  The package is
+# built in this workspace so the selected sensor profile and driver stay paired.
+RUN git clone --branch humble-0.15.1 --depth 1 \
+      https://github.com/ouster-lidar/ouster-ros.git \
+      /ros2_ws/src/ouster-ros \
+ && cd /ros2_ws/src/ouster-ros \
+ && test "$(git rev-parse HEAD)" = "73cf03684ae3576b40a263ae31bb64a617268aca" \
+ && git submodule update --init --recursive
 
 RUN source /opt/ros/humble/setup.bash \
  && rosdep update \
- && rosdep install --from-paths src --ignore-src -r -y \
- && colcon build --merge-install --cmake-args -DCMAKE_BUILD_TYPE=Release \
+ && rosdep install --from-paths src/ouster-ros --ignore-src -r -y \
+ && colcon build --merge-install --packages-up-to ouster_ros \
+      --cmake-args -DCMAKE_BUILD_TYPE=Release
+
+# The Isaac base carries an older header-only diagnostic_updater package while
+# current Velodyne binaries link its shared library; force the matching update.
+RUN apt-get update --allow-releaseinfo-change \
+ && apt-get install -y --no-install-recommends ros-humble-diagnostic-updater
+
+COPY ros2_ws/src /ros2_ws/src
+
+RUN source /opt/ros/humble/setup.bash \
+ && source /ros2_ws/install/setup.bash \
+ && rosdep install --from-paths src/ddlzd_core src/ddlzd_msgs src/ddlzd_ros --ignore-src -r -y \
+ && colcon build --merge-install --packages-select ddlzd_core ddlzd_msgs ddlzd_ros \
+      --cmake-args -DCMAKE_BUILD_TYPE=Release \
+ && colcon test --merge-install --packages-select ddlzd_core ddlzd_msgs ddlzd_ros \
+      --event-handlers console_direct+ \
+ && colcon test-result --verbose \
  && rm -rf build log /var/lib/apt/lists/*
 
 COPY docker/ros_entrypoint_live.sh /ros_entrypoint_live.sh

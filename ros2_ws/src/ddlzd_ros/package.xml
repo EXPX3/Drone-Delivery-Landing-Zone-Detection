@@ -2,7 +2,7 @@
 <package format="3">
   <name>ddlzd_ros</name>
   <version>0.1.0</version>
-  <description>Lifecycle ROS 2 node for Ouster point-cloud landing-zone detection.</description>
+  <description>Lifecycle ROS 2 node for multi-LiDAR landing-zone detection and GNSS publication.</description>
   <maintainer email="robotgir6937@gmail.com">EXPX3</maintainer>
   <license>MIT</license>
 
@@ -11,6 +11,8 @@
   <depend>ddlzd_msgs</depend>
   <depend>diagnostic_msgs</depend>
   <depend>eigen</depend>
+  <depend>geographic_msgs</depend>
+  <depend>geographiclib</depend>
   <depend>geometry_msgs</depend>
   <depend>libpcl-all-dev</depend>
   <depend>pcl_conversions</depend>
@@ -19,6 +21,7 @@
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
   <depend>tf2_eigen</depend>
+  <depend>tf2_geometry_msgs</depend>
   <depend>tf2_ros</depend>
   <depend>tf2_sensor_msgs</depend>
   <depend>visualization_msgs</depend>
@@ -26,7 +29,9 @@
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>lifecycle_msgs</exec_depend>
   <exec_depend>ouster_ros</exec_depend>
+  <exec_depend>rosbag2_py</exec_depend>
   <exec_depend>rviz2</exec_depend>
+  <exec_depend>velodyne</exec_depend>
   <test_depend>ament_cmake_gtest</test_depend>
 
   <export>
